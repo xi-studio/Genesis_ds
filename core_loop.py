@@ -1,5 +1,5 @@
 """
-MolAgent Core Loop (DeepSeek) — perceive → infer (tools) → chain/wait.
+Core Loop (DeepSeek) — perceive → infer (tools) → chain/wait.
 
 Use ``config.json`` with ``api.deepseek.com`` and optional ``llm_extra_body`` for
 ``thinking`` / ``reasoning_effort``. API key: ``DEEPSEEK_API_KEY`` or ``api_key`` in config.

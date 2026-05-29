@@ -1,4 +1,4 @@
-"""MolAgent Core Loop Server — Web UI + WebSocket + Control + Stdin.
+"""Core Loop Server — Web UI + WebSocket + Control + Stdin.
 
 This module handles ALL server/UI concerns. core_loop.py remains pure kernel.
 """
