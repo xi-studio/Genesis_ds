@@ -1,0 +1,37 @@
+{
+  "base_url": "https://api.deepseek.com",
+  "api_key": "sk-REPLACE_WITH_YOUR_KEY",
+  "model": "deepseek-v4-pro",
+  "stream": true,
+  "stream_flush_chars": 0,
+  "split_input_prompt": false,
+  "temperature": 0.1,
+  "max_tokens": 8192,
+  "request_timeout": {
+    "total": 3600
+  },
+  "llm_extra_body": {
+    "thinking": {
+      "type": "enabled"
+    },
+    "reasoning_effort": "high"
+  },
+  "workspace_rel": "workspace",
+  "agent_db_file": "workspace/agent.db",
+  "core_memory_max_tokens": 20000,
+  "context_window_max_tokens": 320000,
+  "context_window_tail_tokens": 80000,
+  "max_tool_rounds": 20,
+  "exec_stdout_max_chars": 32000,
+  "exec_batch_interrupt_on_human": false,
+  "self_continue_gap_sec": 15,
+  "self_explore_gap_sec": 180,
+  "call_for_human_wait_sec": 180,
+  "sleep_default_sec": 1800,
+  "sleep_max_sec": 86400,
+  "log_file": "workspace/core_loop.log",
+  "control_listen": "127.0.0.1:18765",
+  "web_listen": "127.0.0.1:18767",
+  "terminal_quiet": true,
+  "stdin_input": false
+}

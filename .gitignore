@@ -1,0 +1,7 @@
+config.json
+workspace/
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+*.egg-info/

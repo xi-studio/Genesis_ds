@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<!-- Chat shell for MolAgent core_loop — layout / tokens echo genesis_web_native (Infero). -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Infero</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='none' stroke='%2300d4aa' stroke-width='4'/><circle cx='50' cy='50' r='8' fill='%2300d4aa'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg: #08080b;
+      --bg-raised: #0e0e13;
+      --text: #c8c8d0;
+      --text-dim: #5a5a6e;
+      --accent: #00d4aa;
+      --accent-dim: rgba(0, 212, 170, 0.08);
+      --accent-glow: rgba(0, 212, 170, 0.25);
+      --border: rgba(255,255,255,0.06);
+      --border-active: rgba(255,255,255,0.12);
+      --red: #e84057;
+      --amber: #d4a017;
+      --panel-bg: #020c1a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'DM Sans', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      height: 100vh;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+    .header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .title-area { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+    .brand-icon {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      color: var(--accent);
+    }
+    .brand-icon svg { display: block; }
+    .header-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+    .last-prompt {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.6rem;
+      font-weight: 400;
+      color: var(--text-dim);
+      letter-spacing: 0.35px;
+      max-width: 60vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .header h1 {
+      margin: 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.12em;
+      text-transform: none;
+    }
+    .title-area .status {
+      margin-left: 4px;
+    }
+    .status {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      font-weight: 300;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      max-width: min(50vw, 28rem);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .status::before {
+      content: '';
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent-glow);
+      animation: pulse 3s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
+    }
+    #chat-box {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      /* smooth + 流式每 chunk 赋值 scrollTop 会叠加动画，导致聊天区与底部输入区视觉来回拉扯 */
+      scroll-behavior: auto;
+      min-height: 0;
+      touch-action: pan-y;
+      overscroll-behavior-y: auto;
+      scrollbar-width: auto;
+      scrollbar-color: var(--border-active) transparent;
+    }
+    #chat-box::-webkit-scrollbar { width: 12px; }
+    #chat-box::-webkit-scrollbar-track { background: transparent; }
+    #chat-box::-webkit-scrollbar-thumb {
+      background: var(--border-active);
+      border-radius: 6px;
+    }
+    #chat-box::-webkit-scrollbar-thumb:hover {
+      background: rgba(110, 130, 180, 0.85);
+    }
+    .msg {
+      max-width: 100%;
+      padding: 8px 12px;
+      border-radius: 6px;
+      line-height: 1.6;
+      font-size: 0.9rem;
+      word-wrap: break-word;
+      animation: msgIn 0.25s ease-out;
+    }
+    @keyframes msgIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .msg.ai {
+      align-self: flex-start;
+      background: var(--accent-dim);
+      border-left: 2px solid var(--accent);
+      color: var(--text);
+    }
+    .msg.system {
+      align-self: stretch;
+      background: rgba(212, 160, 23, 0.04);
+      border: 1px solid rgba(212, 160, 23, 0.15);
+      border-left: 2px solid var(--amber);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+    .msg-timestamp {
+      align-self: stretch;
+      text-align: center;
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      margin: 10px 0 6px;
+      padding: 10px 0 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .chat > .msg-timestamp:first-child {
+      border-top: none;
+      margin-top: 0;
+      padding-top: 2px;
+    }
+    .msg-thinking {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      font-style: italic;
+      border-left: 2px solid var(--text-dim);
+      padding-left: 10px;
+      margin-bottom: 10px;
+      opacity: 0.85;
+      line-height: 1.5;
+    }
+    .msg-thinking-fold {
+      margin-bottom: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.22);
+      overflow: hidden;
+    }
+    .msg-thinking-fold:not([open]) {
+      border-bottom: 1px solid var(--border);
+    }
+    .msg-thinking-summary {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      padding: 8px 12px;
+      list-style: none;
+      user-select: none;
+      background: var(--accent-dim);
+      border-bottom: 1px solid var(--border);
+    }
+    .msg-thinking-summary::-webkit-details-marker { display: none; }
+    .msg-thinking-summary::after {
+      content: '';
+      flex-shrink: 0;
+      width: 0;
+      height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid var(--text-dim);
+      transform: rotate(0deg);
+      transition: transform 0.15s ease;
+    }
+    .msg-thinking-fold[open] > .msg-thinking-summary::after {
+      transform: rotate(180deg);
+    }
+    .msg-thinking-body {
+      font-size: 0.76rem;
+      color: var(--text-dim);
+      font-style: italic;
+      border-left: 2px solid rgba(90, 90, 110, 0.6);
+      padding: 8px 10px 10px 12px;
+      margin: 0;
+      line-height: 1.45;
+      opacity: 0.92;
+      max-height: min(18vh, 160px);
+      overflow-x: auto;
+      overflow-y: auto;
+      min-height: 0;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: auto;
+      scrollbar-width: auto;
+      scrollbar-color: var(--border-active) transparent;
+    }
+    .msg-thinking-body::-webkit-scrollbar { width: 8px; height: 8px; }
+    .msg-thinking-body::-webkit-scrollbar-thumb {
+      background: var(--border-active);
+      border-radius: 4px;
+    }
+    .msg-thinking-body p { margin: 0 0 4px 0; }
+    .msg-thinking-body p:last-child { margin-bottom: 0; }
+    /* 本轮 infer：无大框，thinking/正文段与 tool/exec 按事件发生顺序交替排列 */
+    .infer-thread {
+      align-self: stretch;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .infer-thread-ts {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      text-align: center;
+      padding: 2px 0 4px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .infer-model-segment.msg.ai {
+      align-self: stretch;
+    }
+    .infer-thread .infer-tool-item {
+      align-self: stretch;
+    }
+    .infer-thread .infer-tool-item.msg {
+      max-width: 100%;
+    }
+    .infer-thread .infer-tool-item.msg.system details.exec-fold > summary {
+      padding: 4px 8px;
+      font-size: 0.62rem;
+      line-height: 1.2;
+    }
+    .infer-thread .infer-tool-item.msg.system details.exec-fold > pre {
+      max-height: min(9vh, 86px);
+      padding: 4px 8px;
+      font-size: 0.7rem;
+      line-height: 1.28;
+    }
+    .infer-thread .infer-tool-item.msg.system details.exec-fold.tool-fold > pre {
+      max-height: min(8vh, 68px);
+    }
+    .infer-thread .infer-tool-item.msg.system code,
+    .infer-thread code {
+      font-size: 0.78em;
+    }
+    .infer-thread .infer-tool-item.msg.ai.exec-stdout .exec-stdout-hdr {
+      font-size: 0.62rem;
+      margin-bottom: 3px;
+    }
+    .infer-thread .infer-tool-item.msg.ai.exec-stdout pre {
+      max-height: min(9vh, 86px);
+      padding: 4px 8px;
+      font-size: 0.7rem;
+      line-height: 1.28;
+    }
+    .infer-thread-error {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--red);
+    }
+    .msg p { margin: 0 0 8px 0; }
+    .msg p:last-child { margin-bottom: 0; }
+    .msg pre {
+      background: #0c0c10;
+      padding: 12px;
+      border-radius: 4px;
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: min(50vh, 420px);
+      min-height: 0;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      border: 1px solid var(--border);
+      font-size: 0.82rem;
+    }
+    .msg.system details.exec-fold {
+      border: 1px solid rgba(212, 160, 23, 0.2);
+      border-radius: 6px;
+      background: rgba(212, 160, 23, 0.04);
+      overflow: hidden;
+    }
+    .msg.system details.exec-fold > summary {
+      cursor: pointer;
+      padding: 8px 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--amber);
+      letter-spacing: 0.3px;
+      list-style: none;
+      user-select: none;
+    }
+    .msg.system details.exec-fold > summary::-webkit-details-marker { display: none; }
+    .msg.system details.exec-fold > pre {
+      margin: 0;
+      border-radius: 0;
+      border: none;
+      border-top: 1px solid var(--border);
+      max-height: min(28vh, 240px);
+      overflow-x: auto;
+      overflow-y: auto;
+      min-height: 0;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    .msg.system details.exec-fold > pre code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.system details.tool-fold {
+      border: 1px solid rgba(0, 212, 170, 0.22);
+      border-radius: 6px;
+      background: rgba(0, 212, 170, 0.05);
+      overflow: hidden;
+    }
+    .msg.system details.tool-fold > summary {
+      color: var(--accent);
+    }
+    /* Tool 参数/返回：可见行数短，全文在折叠内滚动 */
+    .msg.system details.exec-fold.tool-fold > pre {
+      max-height: min(11vh, 88px);
+    }
+    .msg code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+    }
+    .msg a { color: var(--accent); text-decoration: none; }
+    .msg a:hover { text-decoration: underline; }
+    /* /exec stdout：与助手正文里的 ``` 代码块同款，不用琥珀色 exec-fold */
+    .msg.ai.exec-stdout .exec-stdout-hdr,
+    .msg.ai .embedded-exec-stdout .exec-stdout-hdr {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.2px;
+      margin-bottom: 8px;
+      opacity: 0.95;
+    }
+    .msg.ai.exec-stdout pre,
+    .msg.ai .embedded-exec-stdout pre {
+      max-height: min(14vh, 120px);
+      padding: 6px 8px;
+      font-size: 0.74rem;
+      line-height: 1.32;
+    }
+    .msg.ai .embedded-exec-stdout {
+      margin: 10px 0;
+      width: 100%;
+    }
+    .input-area {
+      padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    textarea {
+      flex: 1;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 0.9rem;
+      resize: none;
+      outline: none;
+      min-height: 44px;
+      max-height: 120px;
+      transition: border-color 0.2s;
+    }
+    textarea::placeholder { color: var(--text-dim); font-size: 0.85rem; }
+    textarea:focus { border-color: var(--accent); }
+    button.send {
+      flex-shrink: 0;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      padding: 0 18px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+      font-size: 0.75rem;
+      letter-spacing: 1px;
+      border-radius: 6px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 5.5rem;
+    }
+    button.send:hover:not(:disabled) {
+      box-shadow: 0 0 20px var(--accent-glow);
+      transform: translateY(-1px);
+    }
+    button.send.send-stop.infer-active {
+      background: rgba(232, 64, 87, 0.12);
+      color: var(--red);
+      border: 1px solid var(--red);
+      box-shadow: none;
+      animation: pulse-stop 1.2s ease-in-out infinite;
+    }
+    button.send.send-stop.infer-active:hover:not(:disabled) {
+      box-shadow: 0 0 18px rgba(232, 64, 87, 0.35);
+      transform: translateY(-1px);
+    }
+    @keyframes pulse-stop {
+      0%, 100% { opacity: 0.88; }
+      50% { opacity: 1; }
+    }
+    button.send:disabled {
+      background: var(--border);
+      color: var(--text-dim);
+      cursor: not-allowed;
+    }
+    .footer-tagline {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      padding: 6px 12px 10px;
+      text-align: center;
+      border-top: 1px solid var(--border);
+      background: var(--panel-bg);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .footer-tagline button.linkish {
+      font-family: inherit;
+      font-size: inherit;
+      color: var(--accent);
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .footer-tagline button.linkish:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="title-area">
+      <span class="brand-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="22" height="22"><circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="50" cy="50" r="8" fill="currentColor"/></svg></span>
+      <h1>Infero</h1>
+      <span class="status" id="status">Disconnected</span>
+    </div>
+    <div class="header-meta">
+      <span class="last-prompt" id="last-prompt-k" title="上一轮输入 token（k 显示）；悬停为精确值（usage.prompt_tokens）">上轮 · —</span>
+    </div>
+  </header>
+  <div id="chat-box"></div>
+  <div class="input-area">
+    <textarea id="input" rows="2" placeholder="有内容 · 按钮发送 · Enter · 空内容 · 按钮或 Enter 打断"></textarea>
+    <button type="button" class="send" id="btn-send">Send</button>
+  </div>
+  <div class="footer-tagline">
+    <span>DB Agent</span>
+    <button type="button" class="linkish" id="btn-clear-history" title="清除浏览器本地保存的聊天记录">清除本地聊天记录</button>
+  </div>
+  <script>
+(function () {
+  const STORAGE_KEY = 'molagent_core_loop_chat_v1';
+  const MAX_HISTORY_ENTRIES = 400;
+  const chat = document.getElementById('chat-box');
+  const input = document.getElementById('input');
+  const statusEl = document.getElementById('status');
+  const lastPromptEl = document.getElementById('last-prompt-k');
+  const btnClearHistory = document.getElementById('btn-clear-history');
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = proto + '//' + location.host + '/ws';
+  let ws = null;
+  let inferring = false;
+  const btnSend = document.getElementById('btn-send');
+  let thinkBuf = '';
+  let replyBuf = '';
+  let streamDiv = null;
+  /** Coalesce frequent MD reparses during WS chunk bursts so the UI can paint incrementally. */
+  let streamRenderRaf = 0;
+  /** 本轮 infer：按事件顺序拼接（多段 thinking/正文 + tool 交错），无外层大框 */
+  let inferThreadEl = null;
+  let historyEntries = [];
+
+  function persistHistory() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(historyEntries));
+    } catch (err) {
+      console.warn('chat history persist failed', err);
+    }
+  }
+
+  function pushHistory(entry) {
+    historyEntries.push(entry);
+    while (historyEntries.length > MAX_HISTORY_ENTRIES) {
+      historyEntries.shift();
+    }
+    persistHistory();
+  }
+
+  function replayHistory() {
+    chat.innerHTML = '';
+    historyEntries.forEach(function (e) {
+      if (e.k === 'user') {
+        renderUser(e.text);
+      } else if (e.k === 'infer_session') {
+        chat.insertAdjacentHTML('beforeend', e.html || '');
+      } else if (e.k === 'ai') {
+        addBubble('ai', e.html);
+      } else if (e.k === 'ai_exec_stdout') {
+        const d = document.createElement('div');
+        d.className = 'msg ai exec-stdout';
+        d.innerHTML = e.html;
+        chat.appendChild(d);
+      } else if (e.k === 'timestamp') {
+        var tdiv = document.createElement('div');
+        tdiv.className = 'msg-timestamp';
+        tdiv.textContent = e.text || '';
+        chat.appendChild(tdiv);
+      } else if (e.k === 'system') {
+        addBubble('system', e.html);
+      }
+    });
+    scrollBottom();
+  }
+
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      historyEntries = parsed;
+      replayHistory();
+    } catch (err) {
+      historyEntries = [];
+      console.warn('chat history load failed', err);
+    }
+  }
+
+  function clearStoredHistory() {
+    historyEntries = [];
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (err) { /* ignore */ }
+    chat.innerHTML = '';
+  }
+
+  function updateSendBtn() {
+    const open = ws && ws.readyState === WebSocket.OPEN;
+    const t = input.value.trim();
+    if (t) {
+      btnSend.textContent = 'Send';
+      btnSend.classList.remove('send-stop', 'infer-active');
+      btnSend.disabled = !open;
+      return;
+    }
+    btnSend.textContent = 'Stop';
+    btnSend.classList.add('send-stop');
+    btnSend.classList.toggle('infer-active', inferring);
+    btnSend.disabled = !open || !inferring;
+  }
+
+  function setInferring(on) {
+    inferring = on;
+    if (on) {
+      statusEl.textContent = 'Inferring… · Stop / Esc 可打断';
+    }
+    updateSendBtn();
+  }
+
+  /** Input tokens in thousands for the status line (from API usage.prompt_tokens). */
+  function formatTokAbbrev(n) {
+    if (typeof n !== 'number' || n < 0 || !isFinite(n)) return '—';
+    var k = n / 1000;
+    if (k >= 100) return Math.round(k) + 'k';
+    var s = k.toFixed(k >= 1 ? 1 : 2).replace(/\.?0+$/, '');
+    return s + 'k';
+  }
+
+  function formatTokInt(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return '';
+    return Math.max(0, Math.round(n)).toLocaleString();
+  }
+
+  /** Hover: exact input count only. */
+  function formatUsageTitle(ev) {
+    var p = ev.prompt_tokens;
+    if (typeof p === 'number' && isFinite(p)) {
+      return '上一轮 · 输入（精确）：' + formatTokInt(p);
+    }
+    return '上一轮：未返回输入 token（流式需 stream_options.include_usage）';
+  }
+
+  function formatUsageLine(ev) {
+    var p = ev.prompt_tokens;
+    if (typeof p === 'number' && isFinite(p)) {
+      return '上轮 · 输入 ' + formatTokAbbrev(p);
+    }
+    return '上轮 · 输入 —';
+  }
+
+  function phaseLabel(ph, ev) {
+    if (ph === 'perceive') return '感知 context · ' + (ev.chars != null ? ev.chars + ' chars' : '');
+    if (ph === 'chain') {
+      const g = ev.gap_sec != null ? ev.gap_sec + 's' : '';
+      const m = ev.gap_mode ? ' · ' + ev.gap_mode : '';
+      return '链式下一轮 · gap ' + g + m;
+    }
+    if (ph === 'wait') {
+      const w = ev.wait_timeout_sec != null ? ev.wait_timeout_sec : ev.watchdog_sec;
+      const ws = w != null ? w + 's' : '';
+      const mode = ev.wait_mode || '';
+      const modeLab =
+        mode === 'call_for_human'
+          ? ' · /call_for_human'
+          : mode === 'sleep'
+            ? ' · /sleep'
+            : mode === 'fallback'
+              ? ' · 默认等待'
+              : '';
+      return '等待唤醒 · 超时 ' + ws + modeLab;
+    }
+    if (ph === 'wait_trigger') return '等待输入 · 超时 ' + (ev.timeout_sec != null ? ev.timeout_sec + 's' : '');
+    return ph;
+  }
+
+  function chatTimezoneLabel() {
+    var off = -new Date().getTimezoneOffset() / 60;
+    return 'UTC' + (off >= 0 ? '+' : '') + off;
+  }
+
+  function formatChatTimestamp(optDate) {
+    var d = optDate && optDate instanceof Date ? optDate : new Date();
+    return d.toLocaleString(undefined, { hour12: false }) + ' (' + chatTimezoneLabel() + ')';
+  }
+
+  /** Centered time row above the next message (genesis_web_native–style). */
+  function addTimestampRow(optDate) {
+    var prev = chat.lastElementChild;
+    if (prev && prev.classList && prev.classList.contains('msg-timestamp')) {
+      prev.remove();
+    }
+    var div = document.createElement('div');
+    div.className = 'msg-timestamp';
+    var label = formatChatTimestamp(optDate);
+    div.textContent = label;
+    chat.appendChild(div);
+    scrollBottom();
+    return label;
+  }
+
+  let scrollBottomRaf = 0;
+  function scrollBottom() {
+    if (inferring) {
+      chat.scrollTop = chat.scrollHeight;
+      requestAnimationFrame(function () {
+        if (inferring) chat.scrollTop = chat.scrollHeight;
+      });
+      return;
+    }
+    if (scrollBottomRaf) return;
+    scrollBottomRaf = requestAnimationFrame(function () {
+      scrollBottomRaf = 0;
+      var dist = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
+      if (dist > 48) return;
+      chat.scrollTop = chat.scrollHeight;
+    });
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /** marked 在流式文本不完整或含怪异序列时可能抛错；抛错会导致整段 onEvent 失败、页面不刷新。 */
+  function markedParseSafe(src) {
+    try {
+      return marked.parse(String(src || ''));
+    } catch (e) {
+      console.warn('marked.parse failed, using plain fallback', e);
+      return '<p class="md-fallback">' + escHtml(String(src || '')).replace(/\n/g, '<br>') + '</p>';
+    }
+  }
+
+  function appendInferToolHtml(classNames, htmlInner) {
+    var d = document.createElement('div');
+    d.className = (classNames || '').trim();
+    d.innerHTML = htmlInner;
+    if (inferThreadEl) {
+      inferThreadEl.appendChild(d);
+    } else {
+      chat.appendChild(d);
+    }
+    scrollBottom();
+    return d;
+  }
+
+  /** tool/exec 之前结束当前流式模型段，之后 thinking/正文会新建一段（顺序与时间线一致） */
+  function breakModelSegmentForTools() {
+    if (!inferThreadEl) return;
+    streamDiv = null;
+    thinkBuf = '';
+    replyBuf = '';
+  }
+
+  function ensureModelSegment() {
+    if (!inferThreadEl || streamDiv) return;
+    streamDiv = document.createElement('div');
+    streamDiv.className = 'msg ai infer-model-segment';
+    streamDiv.innerHTML = '';
+    inferThreadEl.appendChild(streamDiv);
+  }
+
+  function addBubble(kind, htmlInner) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + kind;
+    d.innerHTML = htmlInner;
+    chat.appendChild(d);
+    scrollBottom();
+    return d;
+  }
+
+  function addExecCodeFold(summaryText, bodyEscaped, openByDefault) {
+    var openAttr = openByDefault ? ' open' : '';
+    const htmlInner =
+      '<details class="exec-fold"' + openAttr + '>'
+      + '<summary>' + escHtml(summaryText) + '</summary>'
+      + '<pre><code>' + bodyEscaped + '</code></pre>'
+      + '</details>';
+    if (inferThreadEl) {
+      breakModelSegmentForTools();
+      appendInferToolHtml('infer-tool-item msg system', htmlInner);
+      return;
+    }
+    addBubble('system', htmlInner);
+    pushHistory({ k: 'system', html: htmlInner });
+  }
+
+  /** Generic function-calling tool (exec 仍走 exec / exec_stdout 事件，避免重复). */
+  function addToolCallFold(toolName, argsEscaped, truncated) {
+    var summary = 'Tool · ' + toolName + ' · 参数';
+    if (truncated) summary += '（截断）';
+    var htmlInner =
+      '<details class="exec-fold tool-fold" open>'
+      + '<summary>' + escHtml(summary) + '</summary>'
+      + '<pre><code>' + argsEscaped + '</code></pre>'
+      + '</details>';
+    if (inferThreadEl) {
+      breakModelSegmentForTools();
+      appendInferToolHtml('infer-tool-item msg system', htmlInner);
+      return;
+    }
+    addBubble('system', htmlInner);
+    pushHistory({ k: 'system', html: htmlInner });
+  }
+
+  function addToolResultFold(toolName, bodyEscaped, truncated) {
+    var summary = 'Tool · ' + toolName + ' · 返回';
+    if (truncated) summary += '（截断）';
+    var htmlInner =
+      '<details class="exec-fold tool-fold" open>'
+      + '<summary>' + escHtml(summary) + '</summary>'
+      + '<pre><code>' + bodyEscaped + '</code></pre>'
+      + '</details>';
+    if (inferThreadEl) {
+      breakModelSegmentForTools();
+      appendInferToolHtml('infer-tool-item msg system', htmlInner);
+      return;
+    }
+    addBubble('system', htmlInner);
+    pushHistory({ k: 'system', html: htmlInner });
+  }
+
+  /** Stdout: same visual as ``` blocks inside assistant messages (no amber fold). */
+  function addExecStdoutAsAiCode(bodyEscaped) {
+    const htmlInner =
+      '<div class="exec-stdout-hdr">' + escHtml('/exec · stdout（print 输出）') + '</div>'
+      + '<pre><code>' + bodyEscaped + '</code></pre>';
+    if (inferThreadEl) {
+      breakModelSegmentForTools();
+      appendInferToolHtml('infer-tool-item msg ai exec-stdout', htmlInner);
+      return;
+    }
+    const d = document.createElement('div');
+    d.className = 'msg ai exec-stdout';
+    d.innerHTML = htmlInner;
+    chat.appendChild(d);
+    scrollBottom();
+    pushHistory({ k: 'ai_exec_stdout', html: htmlInner });
+  }
+
+  function renderUser(text) {
+    addBubble('user', escHtml(text).replace(/\n/g, '<br>'));
+  }
+
+  function addUser(text) {
+    var ts = addTimestampRow();
+    pushHistory({ k: 'timestamp', text: ts });
+    renderUser(text);
+    pushHistory({ k: 'user', text: text });
+  }
+
+  var STDOUT_MARKER = 'System - [/exec python stdout]';
+
+  /** End of pasted stdout body: next tail token, markdown heading, or next System line */
+  function findEmbeddedStdoutBodyEnd(rest) {
+    var re = /\n\n(?:\*\*|System - \[|\/(?:mode|exec python|call_for_human|call_for_trigger|self_continue|self_explore|sleep)\b)|\n\/(?:mode|exec python)\b/;
+    var m = re.exec(rest);
+    return m ? m.index : rest.length;
+  }
+
+  /** Model sometimes pastes consciousness lines; lift marker+body into same box as WS exec_stdout */
+  function parseReplyMarkdownWithStdoutBlocks(md) {
+    var norm = String(md || '').replace(/\r\n/g, '\n');
+    if (norm.indexOf(STDOUT_MARKER) === -1) {
+      return markedParseSafe(norm);
+    }
+    var pos = 0;
+    var html = '';
+    while (pos < norm.length) {
+      var mi = norm.indexOf(STDOUT_MARKER, pos);
+      if (mi === -1) {
+        html += markedParseSafe(norm.slice(pos));
+        break;
+      }
+      if (mi > pos) {
+        html += markedParseSafe(norm.slice(pos, mi));
+      }
+      var afterMark = mi + STDOUT_MARKER.length;
+      if (norm.charAt(afterMark) === '\n') {
+        afterMark++;
+      }
+      var rest = norm.slice(afterMark);
+      var endRel = findEmbeddedStdoutBodyEnd(rest);
+      var body = rest.slice(0, endRel).replace(/\n+$/, '');
+      html += (
+        '<div class="embedded-exec-stdout">'
+        + '<div class="exec-stdout-hdr">' + escHtml('System · /exec stdout（正文摘录）') + '</div>'
+        + '<pre><code>' + escHtml(body) + '</code></pre></div>'
+      );
+      pos = afterMark + endRel;
+    }
+    return html;
+  }
+
+  /** 思考：带标题的可折叠块（与正文分离，默认展开） */
+  function wrapThinkingBlock(innerHtml) {
+    return (
+      '<details class="msg-thinking-fold" open>'
+      + '<summary class="msg-thinking-summary">思考</summary>'
+      + '<div class="msg-thinking-body">' + innerHtml + '</div>'
+      + '</details>'
+    );
+  }
+
+  /** If marked strips everything (incomplete MD / edge cases), still show plain text. */
+  function thinkingInnerHtml(raw) {
+    raw = String(raw || '');
+    if (!raw.trim()) return '';
+    var md = markedParseSafe(raw);
+    try {
+      var probe = document.createElement('div');
+      probe.innerHTML = md;
+      if (!((probe.textContent || '').trim())) {
+        return '<p class="md-fallback">' + escHtml(raw).replace(/\n/g, '<br>') + '</p>';
+      }
+    } catch (e) {
+      return '<p class="md-fallback">' + escHtml(raw).replace(/\n/g, '<br>') + '</p>';
+    }
+    return md;
+  }
+
+  function scheduleRenderStreamingAi() {
+    if (!streamDiv) return;
+    if (streamRenderRaf) return;
+    streamRenderRaf = requestAnimationFrame(function () {
+      streamRenderRaf = 0;
+      renderStreamingAi();
+    });
+  }
+
+  function renderStreamingAi() {
+    if (!streamDiv) return;
+    try {
+      let body = (thinkBuf || '').trim()
+        ? wrapThinkingBlock(thinkingInnerHtml(thinkBuf))
+        : '';
+      body += parseReplyMarkdownWithStdoutBlocks(replyBuf);
+      streamDiv.innerHTML = body;
+      streamDiv.querySelectorAll('.msg-thinking-body').forEach(function (el) {
+        el.scrollTop = el.scrollHeight;
+      });
+      streamDiv.querySelectorAll('pre').forEach(function (pre) { pre.scrollTop = pre.scrollHeight; });
+    } catch (e) {
+      console.warn('renderStreamingAi failed', e);
+      var fallback = escHtml(thinkBuf + replyBuf).replace(/\n/g, '<br>');
+      if ((thinkBuf || '').trim()) {
+        streamDiv.innerHTML = wrapThinkingBlock('<p class="md-fallback">' + fallback + '</p>');
+      } else {
+        streamDiv.innerHTML = '<p class="md-fallback">' + fallback + '</p>';
+      }
+    }
+    scrollBottom();
+  }
+
+  /** 晚连 WS 等未收到 infer_begin 时补建时间线容器 */
+  function ensureInferThread() {
+    if (inferThreadEl) return;
+    thinkBuf = thinkBuf || '';
+    replyBuf = replyBuf || '';
+    inferThreadEl = document.createElement('div');
+    inferThreadEl.className = 'infer-thread';
+    var tsHead = document.createElement('div');
+    tsHead.className = 'infer-thread-ts';
+    tsHead.textContent = formatChatTimestamp();
+    inferThreadEl.appendChild(tsHead);
+    chat.appendChild(inferThreadEl);
+    scrollBottom();
+    setInferring(true);
+  }
+
+  function finalizeStream() {
+    if (streamRenderRaf) {
+      cancelAnimationFrame(streamRenderRaf);
+      streamRenderRaf = 0;
+    }
+    if (streamDiv) {
+      try {
+        renderStreamingAi();
+        if (!inferThreadEl) {
+          pushHistory({ k: 'ai', html: streamDiv.innerHTML });
+        }
+      } catch (e) {
+        console.warn('finalizeStream failed', e);
+        var fb = escHtml(thinkBuf + replyBuf).replace(/\n/g, '<br>');
+        streamDiv.innerHTML = (thinkBuf || '').trim()
+          ? wrapThinkingBlock('<p class="md-fallback">' + fb + '</p>')
+          : '<p class="md-fallback">' + fb + '</p>';
+        if (!inferThreadEl) {
+          pushHistory({ k: 'ai', html: streamDiv.innerHTML });
+        }
+      }
+      streamDiv = null;
+    }
+    thinkBuf = '';
+    replyBuf = '';
+  }
+
+  function onEvent(ev) {
+    try {
+      _onEvent_inner(ev);
+    } catch (err) {
+      console.warn('onEvent failed', err, ev);
+    }
+  }
+
+  function _onEvent_inner(ev) {
+    const t = ev.event;
+    if (t === 'hello') {
+      statusEl.textContent = 'Ready · ' + (ev.model || '');
+      return;
+    }
+    if (t === 'user') {
+      addUser(ev.text || '');
+      return;
+    }
+    if (t === 'infer_begin') {
+      finalizeStream();
+      if (inferThreadEl) {
+        pushHistory({ k: 'infer_session', html: inferThreadEl.outerHTML });
+        inferThreadEl.remove();
+        inferThreadEl = null;
+      }
+      thinkBuf = '';
+      replyBuf = '';
+      streamDiv = null;
+      inferThreadEl = document.createElement('div');
+      inferThreadEl.className = 'infer-thread';
+      var tsInfer = formatChatTimestamp();
+      var tsHead = document.createElement('div');
+      tsHead.className = 'infer-thread-ts';
+      tsHead.textContent = tsInfer;
+      inferThreadEl.appendChild(tsHead);
+      chat.appendChild(inferThreadEl);
+      scrollBottom();
+      setInferring(true);
+      return;
+    }
+    if (t === 'think_set') {
+      ensureInferThread();
+      ensureModelSegment();
+      thinkBuf = String(ev.text || '');
+      scheduleRenderStreamingAi();
+      return;
+    }
+    if (t === 'think_delta') {
+      ensureInferThread();
+      ensureModelSegment();
+      thinkBuf += (ev.text || '');
+      scheduleRenderStreamingAi();
+      return;
+    }
+    if (t === 'reply_delta') {
+      ensureInferThread();
+      ensureModelSegment();
+      replyBuf += (ev.text || '');
+      scheduleRenderStreamingAi();
+      return;
+    }
+    if (t === 'infer_end') {
+      try {
+        if (ev.ok !== false) {
+          if (typeof ev.think_text === 'string' && ev.think_text.trim() && !((thinkBuf || '').trim())) {
+            thinkBuf = ev.think_text;
+          }
+          if (typeof ev.reply_text === 'string' && ev.reply_text.trim() && !((replyBuf || '').trim())) {
+            replyBuf = ev.reply_text;
+          }
+          var comb = (thinkBuf || '') + (replyBuf || '');
+          if (!comb.trim() && ev.display_text && String(ev.display_text).trim()) {
+            replyBuf = String(ev.display_text);
+          }
+          comb = (thinkBuf || '') + (replyBuf || '');
+          if (!streamDiv && inferThreadEl && comb.trim()) {
+            ensureModelSegment();
+          }
+          if (streamDiv) {
+            if (streamRenderRaf) {
+              cancelAnimationFrame(streamRenderRaf);
+              streamRenderRaf = 0;
+            }
+            renderStreamingAi();
+          }
+        }
+        finalizeStream();
+        if (inferThreadEl) {
+          if (ev.ok === false) {
+            var errText = ev.error || (ev.cancelled ? '本轮推理已打断（Infer cancelled）' : 'Error');
+            appendInferToolHtml(
+              'infer-tool-item msg system',
+              '<p class="infer-thread-error">' + escHtml(errText) + '</p>'
+            );
+          }
+          pushHistory({ k: 'infer_session', html: inferThreadEl.outerHTML });
+          inferThreadEl = null;
+        } else if (ev.ok === false) {
+          const err = ev.error || (ev.cancelled ? '本轮推理已打断（Infer cancelled）' : 'Error');
+          const sysHtml = escHtml(err);
+          addBubble('system', sysHtml);
+          pushHistory({ k: 'system', html: sysHtml });
+        }
+        if (lastPromptEl && ev.ok !== false) {
+          lastPromptEl.textContent = formatUsageLine(ev);
+          lastPromptEl.title = formatUsageTitle(ev);
+        }
+      } finally {
+        setInferring(false);
+        statusEl.textContent = 'Idle';
+      }
+      return;
+    }
+    if (t === 'exec_stdout') {
+      const txt = (ev.text || '').trim();
+      if (!txt) return;
+      ensureInferThread();
+      addExecStdoutAsAiCode(escHtml(txt));
+      return;
+    }
+    if (t === 'exec') {
+      const p = (ev.preview || '').trim();
+      ensureInferThread();
+      addExecCodeFold('/exec python · 预览', escHtml(p), false);
+      return;
+    }
+    if (t === 'tool_call') {
+      var tn = (ev.name || '').trim() || 'tool';
+      ensureInferThread();
+      addToolCallFold(tn, escHtml(ev.arguments || ''), !!ev.truncated);
+      return;
+    }
+    if (t === 'tool_result') {
+      var tn2 = (ev.name || '').trim() || 'tool';
+      ensureInferThread();
+      addToolResultFold(tn2, escHtml(ev.text || ''), !!ev.truncated);
+      return;
+    }
+    if (t === 'phase') {
+      const ph = ev.phase || '';
+      statusEl.textContent = phaseLabel(ph, ev);
+      return;
+    }
+    if (t === 'host_decision') {
+      const bits = [];
+      bits.push(ev.chain ? '链式继续' : '等待触发');
+      if (ev.tail_self_continue) bits.push('· 尾 /self_continue');
+      if (ev.tail_self_explore) bits.push('· 尾 /self_explore');
+      if (ev.tail_call_for_human) bits.push('· 尾 /call_for_human');
+      if (ev.tail_sleep) bits.push('· 尾 /sleep');
+      statusEl.textContent = bits.join(' ');
+      return;
+    }
+  }
+
+  function connect() {
+    statusEl.textContent = 'Connecting…';
+    ws = new WebSocket(wsUrl);
+    ws.onopen = function () {
+      statusEl.textContent = '已连接';
+      updateSendBtn();
+    };
+    ws.onclose = function () {
+      statusEl.textContent = '未连接 — 请刷新';
+      if (streamRenderRaf) {
+        cancelAnimationFrame(streamRenderRaf);
+        streamRenderRaf = 0;
+      }
+      streamDiv = null;
+      inferThreadEl = null;
+      inferring = false;
+      updateSendBtn();
+    };
+    ws.onerror = function () {
+      statusEl.textContent = 'WebSocket error';
+    };
+    ws.onmessage = function (e) {
+      try {
+        onEvent(JSON.parse(e.data));
+      } catch (err) { console.warn(err); }
+    };
+  }
+
+  function sendChat(text) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'chat', text: text }));
+  }
+
+  function sendCancel() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!inferring) return;
+    ws.send(JSON.stringify({ cmd: 'cancel' }));
+  }
+
+  btnSend.onclick = function () {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const t = input.value.trim();
+    if (t) {
+      input.value = '';
+      updateSendBtn();
+      sendChat(t);
+      return;
+    }
+    sendCancel();
+  };
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      sendCancel();
+    }
+  });
+
+  input.addEventListener('input', updateSendBtn);
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      btnSend.click();
+    }
+  });
+
+  updateSendBtn();
+  loadHistory();
+  connect();
+
+  if (btnClearHistory) {
+    btnClearHistory.onclick = function () {
+      if (window.confirm('确定清除本地保存的聊天记录？（不可恢复）')) {
+        clearStoredHistory();
+      }
+    };
+  }
+})();
+  </script>
+</body>
+</html>
