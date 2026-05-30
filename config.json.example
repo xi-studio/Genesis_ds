@@ -1,6 +1,6 @@
 {
   "base_url": "https://api.deepseek.com",
-  "api_key": "sk-REPLACE_WITH_YOUR_KEY",
+  "api_key": "REPLACE_WITH_YOUR_KEY",
   "model": "deepseek-v4-pro",
   "stream": true,
   "stream_flush_chars": 0,
@@ -29,7 +29,7 @@
   "call_for_human_wait_sec": 180,
   "sleep_default_sec": 1800,
   "sleep_max_sec": 86400,
-  "log_file": "workspace/core_loop.log",
+  "log_file": "workspace/agent.log",
   "control_listen": "127.0.0.1:18765",
   "web_listen": "127.0.0.1:18767",
   "terminal_quiet": true,
