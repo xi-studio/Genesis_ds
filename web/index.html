@@ -594,7 +594,7 @@
         addBubble('system', e.html);
       }
     });
-    scrollBottom();
+    scrollBottom(true);
   }
 
   function loadHistory() {
@@ -724,7 +724,7 @@
   }
 
   let scrollBottomRaf = 0;
-  function scrollBottom() {
+  function scrollBottom(force) {
     if (inferring) {
       chat.scrollTop = chat.scrollHeight;
       requestAnimationFrame(function () {
@@ -736,9 +736,19 @@
     scrollBottomRaf = requestAnimationFrame(function () {
       scrollBottomRaf = 0;
       var dist = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
-      if (dist > 48) return;
+      if (!force && dist > 48) return;
       chat.scrollTop = chat.scrollHeight;
     });
+  }
+
+  function scrollLatestAfterLayout() {
+    scrollBottom(true);
+    requestAnimationFrame(function () {
+      scrollBottom(true);
+    });
+    window.setTimeout(function () {
+      scrollBottom(true);
+    }, 80);
   }
 
   function escHtml(s) {
@@ -1246,6 +1256,7 @@
 
   updateSendBtn();
   loadHistory();
+  scrollLatestAfterLayout();
   connect();
 
   if (btnClearHistory) {
