@@ -674,7 +674,12 @@
   }
 
   function phaseLabel(ph, ev) {
-    if (ph === 'perceive') return '感知 context · ' + (ev.chars != null ? ev.chars + ' chars' : '');
+    if (ph === 'perceive') {
+      const parts = [];
+      if (ev.messages != null) parts.push(ev.messages + ' msgs');
+      if (ev.approx_ref_tokens != null) parts.push('~' + ev.approx_ref_tokens + ' tok');
+      return '感知 context · ' + (parts.length ? parts.join(' · ') : '—');
+    }
     if (ph === 'chain') {
       const g = ev.gap_sec != null ? ev.gap_sec + 's' : '';
       const m = ev.gap_mode ? ' · ' + ev.gap_mode : '';

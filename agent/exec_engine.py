@@ -15,7 +15,7 @@ from contextlib import redirect_stdout
 from datetime import datetime
 
 from agent.config import Config
-from agent.output import say, output_stream
+from agent.output import say
 import agent.ui_stub as _us
 
 
@@ -89,10 +89,9 @@ async def run_exec_source_once(source: str, exec_globals: dict) -> str:
     else:
         raw_out = buf.getvalue()
         if raw_out:
-            _OUT = output_stream()
-            print(raw_out, end="", file=_OUT, flush=True)
+            say(raw_out, end="", flush=True)
             if not raw_out.endswith("\n"):
-                print(file=_OUT, flush=True)
+                say("", flush=True)
         if raw_out.strip():
             lim = _exec_stdout_max_chars()
             body = (

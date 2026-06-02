@@ -301,9 +301,7 @@ def main() -> int:
                 asyncio.create_task(ui_srv.serve_forever())
             except OSError as e:
                 msg = f"  ui: bind {cfg.ui_host}:{cfg.ui_port} failed: {e}"
-                say(msg)
-                if cfg.terminal_quiet:
-                    print(msg, file=sys.stderr, flush=True)
+                say(msg, file=sys.stderr, flush=True)
 
         # Start Web server
         if cfg.web_port > 0:
@@ -314,18 +312,12 @@ def main() -> int:
                     "— browser chat (WebSocket /ws); set terminal_quiet + log_file as needed"
                 )
                 say(web_msg)
-                if cfg.terminal_quiet:
-                    print(web_msg, file=sys.stderr, flush=True)
             except OSError as e:
                 msg = f"  web: bind {cfg.web_host}:{cfg.web_port} failed: {e}"
-                say(msg)
-                if cfg.terminal_quiet:
-                    print(msg, file=sys.stderr, flush=True)
+                say(msg, file=sys.stderr, flush=True)
             except ImportError as e:
                 msg = f"  web: aiohttp required — uv add aiohttp ({e})"
-                say(msg)
-                if cfg.terminal_quiet:
-                    print(msg, file=sys.stderr, flush=True)
+                say(msg, file=sys.stderr, flush=True)
 
         # Start Control server
         if cfg.control_port > 0:
@@ -348,9 +340,7 @@ def main() -> int:
                 asyncio.create_task(srv.serve_forever())
             except OSError as e:
                 msg = f"  control: bind {cfg.control_host}:{cfg.control_port} failed: {e}"
-                say(msg)
-                if cfg.terminal_quiet:
-                    print(msg, file=sys.stderr, flush=True)
+                say(msg, file=sys.stderr, flush=True)
 
         # Run core loop
         await core_loop.main()
