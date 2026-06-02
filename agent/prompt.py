@@ -30,8 +30,6 @@ def infer_system_content() -> str:
     cap = max(1, int(cfg.max_exec_source_chars))
     mtr = max(1, int(cfg.max_tool_rounds))
     gap = cfg.self_continue_gap_sec
-    exg = cfg.self_explore_gap_sec
-    wf = cfg.call_for_human_wait_sec
     sd = cfg.sleep_default_sec
     sm = cfg.sleep_max_sec
 
@@ -41,8 +39,6 @@ def infer_system_content() -> str:
         workspace_rel=cfg.workspace_rel,
         cm=cm,
         gap=float(gap),
-        exg=float(exg),
-        wf=float(wf),
         sd=float(sd),
         sm=float(sm),
         cap=cap,

@@ -685,13 +685,11 @@
       const ws = w != null ? w + 's' : '';
       const mode = ev.wait_mode || '';
       const modeLab =
-        mode === 'call_for_human'
-          ? ' · /call_for_human'
-          : mode === 'sleep'
-            ? ' · /sleep'
-            : mode === 'fallback'
-              ? ' · 默认等待'
-              : '';
+        mode === 'sleep'
+          ? ' · /sleep'
+          : mode === 'fallback'
+            ? ' · 默认等待'
+            : '';
       return '等待唤醒 · 超时 ' + ws + modeLab;
     }
     if (ph === 'wait_trigger') return '等待输入 · 超时 ' + (ev.timeout_sec != null ? ev.timeout_sec + 's' : '');
@@ -891,7 +889,7 @@
 
   /** End of pasted stdout body: next tail token, markdown heading, or next System line */
   function findEmbeddedStdoutBodyEnd(rest) {
-    var re = /\n\n(?:\*\*|System - \[|\/(?:mode|exec python|call_for_human|call_for_trigger|self_continue|self_explore|sleep)\b)|\n\/(?:mode|exec python)\b/;
+    var re = /\n\n(?:\*\*|System - \[|\/(?:mode|exec python|call_for_trigger|next|sleep)\b)|\n\/(?:mode|exec python)\b/;
     var m = re.exec(rest);
     return m ? m.index : rest.length;
   }
@@ -1179,9 +1177,7 @@
     if (t === 'host_decision') {
       const bits = [];
       bits.push(ev.chain ? '链式继续' : '等待触发');
-      if (ev.tail_self_continue) bits.push('· 尾 /self_continue');
-      if (ev.tail_self_explore) bits.push('· 尾 /self_explore');
-      if (ev.tail_call_for_human) bits.push('· 尾 /call_for_human');
+      if (ev.tail_next) bits.push('· 尾 /next');
       if (ev.tail_sleep) bits.push('· 尾 /sleep');
       statusEl.textContent = bits.join(' ');
       return;
