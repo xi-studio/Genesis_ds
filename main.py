@@ -225,13 +225,11 @@ async def _dispatch_ui_message(msg: dict) -> None:
 
 
 # --- Stdin Listener ---
-def _start_stdin_listener(split_prompt: bool = False, prompt_ready: threading.Event | None = None) -> None:
+def _start_stdin_listener() -> None:
     """Start a background thread that reads lines from stdin and triggers the loop."""
 
     def _reader() -> None:
         try:
-            if split_prompt and prompt_ready is not None:
-                prompt_ready.wait()
             for line in sys.stdin:
                 line = line.strip()
                 if not line:
@@ -268,24 +266,7 @@ def main() -> int:
     import agent.ui_stub as _us
     _us.ui_broadcast_lock = asyncio.Lock()
 
-    # Determine input mode
     _tty = hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
-    _use_split = cfg.split_input_prompt and _tty and cfg.stdin_input
-    _split_ok = False
-    if _use_split:
-        try:
-            import prompt_toolkit  # noqa: F401
-            _split_ok = True
-        except ImportError:
-            say(
-                "[core_loop] TTY input: install prompt_toolkit for a fixed bottom line "
-                "(uv add prompt-toolkit). Using plain stdin until then.",
-                file=sys.stderr,
-                flush=True,
-            )
-
-    split_prompt_boot = threading.Event() if _split_ok else None
-    core_loop._split_prompt_boot = split_prompt_boot
 
     if cfg.stdin_input and not _tty:
         say(
@@ -294,7 +275,7 @@ def main() -> int:
             flush=True,
         )
     if cfg.stdin_input:
-        _start_stdin_listener(split_prompt=_split_ok, prompt_ready=split_prompt_boot)
+        _start_stdin_listener()
     elif cfg.control_port <= 0:
         say(
             "[core_loop] stdin_input is false but no control_listen — inject via trigger only.",

@@ -4,7 +4,6 @@
   "model": "deepseek-v4-pro",
   "stream": true,
   "stream_flush_chars": 0,
-  "split_input_prompt": false,
   "temperature": 0.1,
   "max_tokens": 8192,
   "request_timeout": {

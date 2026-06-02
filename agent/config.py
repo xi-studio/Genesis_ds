@@ -144,7 +144,6 @@ class Config:
     # --- I/O ---
     log_file: str = ""
     terminal_quiet: bool = False
-    split_input_prompt: bool = False
     stdin_input: bool = True
 
     # --- Network ---
@@ -375,13 +374,6 @@ class Config:
             self.terminal_quiet = env_tq
         else:
             self.terminal_quiet = False
-
-        sip = cfg.get("split_input_prompt")
-        env_sip = _env_bool("CORE_LOOP_SPLIT_INPUT")
-        if sip is not None:
-            self.split_input_prompt = bool(sip)
-        elif env_sip is not None:
-            self.split_input_prompt = env_sip
 
         if cfg.get("stdin_input") is not None:
             self.stdin_input = bool(cfg["stdin_input"])
