@@ -289,15 +289,6 @@ def main() -> int:
         if cfg.ui_port > 0:
             try:
                 ui_srv = await asyncio.start_server(_ui_session, cfg.ui_host, cfg.ui_port)
-                for s in ui_srv.sockets or []:
-                    addr = s.getsockname()
-                    if isinstance(addr, tuple) and len(addr) >= 2:
-                        say(
-                            f"  ui (TUI): listen {addr} — "
-                            f"python core_loop_tui.py or nc {addr[0]} {addr[1]} (NDJSON lines)"
-                        )
-                    else:
-                        say(f"  ui (TUI): listen {addr}")
                 asyncio.create_task(ui_srv.serve_forever())
             except OSError as e:
                 msg = f"  ui: bind {cfg.ui_host}:{cfg.ui_port} failed: {e}"
@@ -307,11 +298,7 @@ def main() -> int:
         if cfg.web_port > 0:
             try:
                 await _start_web_server()
-                web_msg = (
-                    f"  web: http://{cfg.web_host}:{cfg.web_port}/ "
-                    "— browser chat (WebSocket /ws); set terminal_quiet + log_file as needed"
-                )
-                say(web_msg)
+                say(f"  web: http://{cfg.web_host}:{cfg.web_port}/")
             except OSError as e:
                 msg = f"  web: bind {cfg.web_host}:{cfg.web_port} failed: {e}"
                 say(msg, file=sys.stderr, flush=True)
@@ -325,18 +312,6 @@ def main() -> int:
                 srv = await asyncio.start_server(
                     _control_session, cfg.control_host, cfg.control_port
                 )
-                for sock in srv.sockets or []:
-                    addr = sock.getsockname()
-                    if isinstance(addr, tuple) and len(addr) >= 2:
-                        say(
-                            f"  control: listen {addr} — e.g. nc {addr[0]} {addr[1]} "
-                            "(lines → [Human]; /cancel /ping /help)"
-                        )
-                    else:
-                        say(
-                            f"  control: listen {addr} — use nc/telnet; "
-                            "lines → [Human]; /cancel /ping /help"
-                        )
                 asyncio.create_task(srv.serve_forever())
             except OSError as e:
                 msg = f"  control: bind {cfg.control_host}:{cfg.control_port} failed: {e}"
