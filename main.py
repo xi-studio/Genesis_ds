@@ -298,7 +298,9 @@ def main() -> int:
         if cfg.web_port > 0:
             try:
                 await _start_web_server()
-                say(f"  web: http://{cfg.web_host}:{cfg.web_port}/")
+                web_url = f"http://{cfg.web_host}:{cfg.web_port}/"
+                print(f"  web: {web_url}", file=sys.stderr, flush=True)
+                say(f"  web: {web_url}")
             except OSError as e:
                 msg = f"  web: bind {cfg.web_host}:{cfg.web_port} failed: {e}"
                 say(msg, file=sys.stderr, flush=True)
