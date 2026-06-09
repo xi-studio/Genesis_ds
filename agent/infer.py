@@ -513,10 +513,11 @@ async def infer(history: list[dict[str, Any]]) -> str:
     if tools:
         return await _infer_with_tools_loop(client, cfg, history, sys_content, tools, _extra)
 
-    messages = _compose_api_messages(sys_content, compose_infer_messages(history))
+    hist = compose_infer_messages(history)
+    messages = _compose_api_messages(sys_content, hist)
     if cfg.stream:
-        return await _infer_streaming(client, cfg, messages, _extra)
-    return await _infer_nonstream(client, cfg, messages, _extra)
+        return await _infer_streaming(client, cfg, messages, _extra, infer_window=hist)
+    return await _infer_nonstream(client, cfg, messages, _extra, infer_window=hist)
 
 
 # ---------------------------------------------------------------------------
@@ -524,7 +525,8 @@ async def infer(history: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 async def _infer_nonstream(client, cfg: Config, messages: list[dict[str, Any]],
-                           _extra: dict[str, Any], tools: list[dict[str, Any]] | None = None) -> str | tuple:
+                           _extra: dict[str, Any], tools: list[dict[str, Any]] | None = None,
+                           *, infer_window: list[dict[str, Any]] | None = None) -> str | tuple:
     """Single non-streaming completion. Returns str (plain) or tuple (tool round)."""
     kw = _api_kwargs(cfg, messages, stream=False, tools=tools, _extra=_extra)
     resp = await client.chat.completions.create(**kw)
@@ -554,7 +556,7 @@ async def _infer_nonstream(client, cfg: Config, messages: list[dict[str, Any]],
     await _us.emit_ui_event(_infer_end_ok_payload(usage, display_text=ai_text,
                                                    think_text=reasoning or None, reply_text=reply or None))
     _calibrate_from_messages(messages + [row], usage)
-    record_infer_prompt_usage(messages, usage)
+    record_infer_prompt_usage(messages, usage, infer_window=infer_window)
     return ai_text
 
 
@@ -563,7 +565,8 @@ async def _infer_nonstream(client, cfg: Config, messages: list[dict[str, Any]],
 # ---------------------------------------------------------------------------
 
 async def _infer_streaming(client, cfg: Config, messages: list[dict[str, Any]],
-                           _extra: dict[str, Any]) -> str:
+                           _extra: dict[str, Any],
+                           *, infer_window: list[dict[str, Any]] | None = None) -> str:
     stream = await _create_stream(client, **_api_kwargs(cfg, messages, stream=True, _extra=_extra))
     reasoning_acc, content_acc, _, usage_seen, _, _ = await _process_stream(stream, cfg, has_tools=False)
 
@@ -577,7 +580,7 @@ async def _infer_streaming(client, cfg: Config, messages: list[dict[str, Any]],
             usage_seen, display_text=ai_text,
             think_text=reasoning_acc or None, reply_text=content_acc or None))
         _calibrate_from_messages(messages + [row], usage_seen)
-        record_infer_prompt_usage(messages, usage_seen)
+        record_infer_prompt_usage(messages, usage_seen, infer_window=infer_window)
     return ai_text
 
 
@@ -662,7 +665,7 @@ async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, An
         extend_messages([persist])
         final_piece = reasoning + c_str
         _calibrate_from_messages(messages + [persist], last_usage)
-        record_infer_prompt_usage(messages, last_usage)
+        record_infer_prompt_usage(messages, last_usage, infer_window=hist)
         await _us.emit_ui_event(_infer_end_ok_payload(
             last_usage, display_text=final_piece,
             think_text=reasoning or None, reply_text=c_str or None))
@@ -678,7 +681,7 @@ async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, An
     hist_tail = compose_infer_messages(perceive())
     tail_messages = _compose_api_messages(sys_content, hist_tail)
     _calibrate_from_messages(tail_messages, last_usage)
-    record_infer_prompt_usage(tail_messages, last_usage)
+    record_infer_prompt_usage(tail_messages, last_usage, infer_window=hist_tail)
     extend_messages([{"role": "assistant", "content": final_piece}])
     say(final_piece, flush=True)
     ev = _infer_end_ok_payload(last_usage, display_text=final_piece, reply_text=final_piece)

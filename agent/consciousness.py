@@ -32,7 +32,7 @@ _STORE_LOCK = threading.RLock()
 _USAGE_ANCHOR_LOCK = threading.Lock()
 _STATE_VERSION = 2
 
-_last_usage_anchor: tuple[int, int] | None = None
+_last_usage_anchor: tuple[int, int, int, int] | None = None  # (api_pt, full_ref, window_ref, tools_ref)
 
 
 # ── DB helpers ──────────────────────────────────────────────────────────
@@ -66,7 +66,29 @@ def _db():
 
 # ── Token calibration ───────────────────────────────────────────────────
 
-def record_infer_prompt_usage(messages_for_request: list[dict[str, Any]], usage: Any) -> None:
+def _tools_token_estimate() -> int:
+    """Heuristic for tool-schema tokens included in API prompt but not in messages."""
+    tools = Config.get().tool_definitions
+    if not tools:
+        return 0
+    try:
+        return count_tokens(json.dumps(tools, ensure_ascii=False))
+    except (TypeError, ValueError):
+        return 0
+
+
+def record_infer_prompt_usage(
+    messages_for_request: list[dict[str, Any]],
+    usage: Any,
+    *,
+    infer_window: list[dict[str, Any]] | None = None,
+) -> None:
+    """Record API prompt usage for scaling window estimates during trim.
+
+    ``infer_window`` is the consciousness slice only (no system / core-memory user).
+    Fixed request overhead (system, injected core memory, tool schemas) is kept
+    separate so trimming the window does not over-shrink it.
+    """
     global _last_usage_anchor
     pt = getattr(usage, "prompt_tokens", None)
     if pt is None:
@@ -77,10 +99,19 @@ def record_infer_prompt_usage(messages_for_request: list[dict[str, Any]], usage:
         return
     if pi <= 0:
         return
-    ref = sum(_single_message_tokens(m) for m in messages_for_request if isinstance(m, dict))
-    if ref > 0:
-        with _USAGE_ANCHOR_LOCK:
-            _last_usage_anchor = (pi, ref)
+    full_ref = sum(_single_message_tokens(m) for m in messages_for_request if isinstance(m, dict))
+    if full_ref <= 0:
+        return
+    if infer_window is None:
+        window_ref = full_ref
+    else:
+        window_ref = sum(_single_message_tokens(m) for m in infer_window if isinstance(m, dict))
+        window_ref = max(0, min(window_ref, full_ref))
+    if window_ref <= 0:
+        return
+    tools_ref = _tools_token_estimate()
+    with _USAGE_ANCHOR_LOCK:
+        _last_usage_anchor = (pi, full_ref, window_ref, tools_ref)
 
 
 def _window_trigger_total(msgs: list[dict[str, Any]]) -> int:
@@ -89,8 +120,17 @@ def _window_trigger_total(msgs: list[dict[str, Any]]) -> int:
         anchor = _last_usage_anchor
     if anchor is None:
         return window_est
-    api_pt, full_ref = anchor
-    return max(0, int(window_est * api_pt / full_ref)) if api_pt > 0 and full_ref > 0 else window_est
+    api_pt, full_ref, window_ref_anchor, tools_ref_anchor = anchor
+    if api_pt <= 0 or full_ref <= 0 or window_ref_anchor <= 0:
+        return window_est
+    tools_ref = _tools_token_estimate() or tools_ref_anchor
+    full_ref_adj = full_ref + max(0, tools_ref)
+    non_window_ref = max(0, full_ref - window_ref_anchor) + max(0, tools_ref)
+    non_window_api = int(api_pt * non_window_ref / full_ref_adj) if full_ref_adj > 0 else 0
+    non_window_api = max(0, min(api_pt, non_window_api))
+    window_api = max(0, api_pt - non_window_api)
+    window_scale = window_api / window_ref_anchor
+    return max(0, int(non_window_api + window_est * window_scale))
 
 
 def _single_message_tokens(m: dict[str, Any]) -> int:
@@ -99,7 +139,7 @@ def _single_message_tokens(m: dict[str, Any]) -> int:
     if isinstance(c, str) and c:
         n += count_tokens(c)
     rc = m.get("reasoning_content")
-    if m.get("tool_calls") and isinstance(rc, str) and rc:
+    if m.get("role") == "assistant" and isinstance(rc, str) and rc:
         n += count_tokens(rc)
     if m.get("tool_calls"):
         try:
@@ -243,6 +283,29 @@ def _left_trim_to_valid_chat_prefix(msgs: list[dict[str, Any]]) -> int:
     return len(msgs)
 
 
+def _atomic_block_len(msgs: list[dict[str, Any]]) -> int:
+    """Left-most trim unit: one message, or assistant + following tool rows."""
+    if not msgs:
+        return 0
+    m = msgs[0]
+    if m.get("role") == "tool":
+        return 1
+    if m.get("role") == "assistant" and (tcs := m.get("tool_calls")):
+        if isinstance(tcs, list) and tcs:
+            return min(len(msgs), 1 + len(tcs))
+    return 1
+
+
+def _pop_left_atomic(msgs: list[dict[str, Any]]) -> tuple[int, int]:
+    """Drop one atomic unit from the left; return (tokens_removed, messages_removed)."""
+    n = _atomic_block_len(msgs)
+    if n <= 0:
+        return 0, 0
+    block = msgs[:n]
+    del msgs[:n]
+    return sum(_single_message_tokens(m) for m in block), n
+
+
 def _tail_assistant_awaits_tool_rows(msgs: list[dict[str, Any]]) -> bool:
     if not msgs:
         return False
@@ -273,25 +336,29 @@ def _maybe_trim_infer_window(conn: sqlite3.Connection, *, quiet: bool,
 
     dropped_token = 0
     if trigger > cap:
-        while len(msgs) > 1 and not (total <= tail_target and _window_trigger_total(msgs) <= cap):
-            total -= _single_message_tokens(msgs[0])
-            msgs.pop(0)
-            dropped_token += 1
+        while len(msgs) > 1 and total > tail_target:
+            removed_tok, removed_n = _pop_left_atomic(msgs)
+            if removed_n <= 0:
+                break
+            total -= removed_tok
+            dropped_token += removed_n
+        while len(msgs) > 1 and _window_trigger_total(msgs) > cap:
+            removed_tok, removed_n = _pop_left_atomic(msgs)
+            if removed_n <= 0:
+                break
+            total -= removed_tok
+            dropped_token += removed_n
 
     api_trim = 0
-    if with_tool_chain_trim:
-        if not (_suffix_is_valid_chat_completions(msgs)
-                and _window_trigger_total(msgs) <= cap
-                and _tail_assistant_awaits_tool_rows(msgs)):
-            api_trim = _left_trim_to_valid_chat_prefix(msgs)
-            if api_trim and msgs:
-                api_trim = min(api_trim, len(msgs))
-                del msgs[:api_trim]
-    elif dropped_token > 0 and not _suffix_is_valid_chat_completions(msgs):
-        t = _left_trim_to_valid_chat_prefix(msgs)
-        if t and msgs:
-            del msgs[:min(t, len(msgs))]
-            api_trim = t
+    needs_prefix_fix = (
+        not _suffix_is_valid_chat_completions(msgs)
+        and not _tail_assistant_awaits_tool_rows(msgs)
+    )
+    if needs_prefix_fix and (with_tool_chain_trim or dropped_token > 0):
+        api_trim = _left_trim_to_valid_chat_prefix(msgs)
+        if api_trim and msgs:
+            api_trim = min(api_trim, len(msgs))
+            del msgs[:api_trim]
 
     if dropped_token == 0 and api_trim == 0:
         return False
@@ -305,7 +372,9 @@ def _maybe_trim_infer_window(conn: sqlite3.Connection, *, quiet: bool,
     if not quiet and (dropped_token or api_trim):
         parts = []
         if dropped_token:
-            parts.append(f"over {cap} ref. tok: dropped {dropped_token} msg → ≤{tail_target} (~{tail_tok} tok)")
+            parts.append(
+                f"over {cap} est. tok: dropped {dropped_token} msg → ≤{tail_target} (~{tail_tok} ref.tok)"
+            )
         if api_trim:
             parts.append(f"tool-chain fix: dropped {api_trim} msg (~{tail_tok} tok)")
         say(f"  [windows] {'; '.join(parts)}")
