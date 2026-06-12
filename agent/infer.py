@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
 from typing import Any
 
 from openai import BadRequestError
 
 from agent.config import Config
+from agent.timestamp import now_local
 from agent.consciousness import (
     compose_infer_messages,
     extend_messages,
@@ -416,7 +416,7 @@ def _usage_for_emit(usage) -> dict[str, int]:
 
 
 def _infer_end_ok_payload(usage, *, display_text=None, think_text=None, reply_text=None) -> dict[str, Any]:
-    ev: dict[str, Any] = {"event": "infer_end", "ok": True, **_usage_for_emit(usage)}
+    ev: dict[str, Any] = {"event": "infer_end", "ok": True, "server_time": now_local(), **_usage_for_emit(usage)}
     for key, val in (("think_text", think_text), ("reply_text", reply_text), ("display_text", display_text)):
         if val is not None and str(val).strip():
             ev[key] = str(val)
@@ -497,13 +497,13 @@ def _api_kwargs(cfg: Config, messages: list[dict[str, Any]], *,
 async def infer(history: list[dict[str, Any]]) -> str:
     cfg = Config.get()
     client = cfg.openai_client
-    await _us.emit_ui_event({"event": "infer_begin"})
+    await _us.emit_ui_event({"event": "infer_begin", "server_time": now_local()})
 
     if client is None:
-        await _us.emit_ui_event({"event": "infer_end", "ok": False, "error": "OpenAI client not initialized"})
+        await _us.emit_ui_event({"event": "infer_end", "ok": False, "server_time": now_local(), "error": "OpenAI client not initialized"})
         return "[Error] OpenAI client not initialized (call apply_config first)"
     if not cfg.api_key:
-        await _us.emit_ui_event({"event": "infer_end", "ok": False, "error": "missing api_key"})
+        await _us.emit_ui_event({"event": "infer_end", "ok": False, "server_time": now_local(), "error": "missing api_key"})
         return "[Error] Missing api_key"
 
     sys_content = infer_system_content()
@@ -623,10 +623,10 @@ async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, An
             adict, last_usage = await _run_tool_round(client, cfg, messages, _extra, tools)
         except asyncio.CancelledError:
             say("\n  [infer cancelled — Ctrl+C]\n", flush=True)
-            await _us.emit_ui_event({"event": "infer_end", "ok": False, "cancelled": True})
+            await _us.emit_ui_event({"event": "infer_end", "ok": False, "server_time": now_local(), "cancelled": True})
             return "[System - infer cancelled by user]\n"
         except Exception as e:
-            await _us.emit_ui_event({"event": "infer_end", "ok": False, "error": f"{type(e).__name__}: {e}"})
+            await _us.emit_ui_event({"event": "infer_end", "ok": False, "server_time": now_local(), "error": f"{type(e).__name__}: {e}"})
             return f"[Error] {type(e).__name__}: {e}"
 
         reasoning = str(adict.get("reasoning_content") or "")
@@ -652,7 +652,7 @@ async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, An
                     out = await run_tool_fn(name, args)
                 except asyncio.CancelledError:
                     say("\n  [infer cancelled — during tool run]\n", flush=True)
-                    await _us.emit_ui_event({"event": "infer_end", "ok": False, "cancelled": True})
+                    await _us.emit_ui_event({"event": "infer_end", "ok": False, "server_time": now_local(), "cancelled": True})
                     return "[System - infer cancelled by user]\n"
                 await _emit_tool_result_ui(cfg, name, tc_id, out)
                 tool_rows.append({"role": "tool", "tool_call_id": tc.get("id") or "", "content": out})
@@ -672,7 +672,7 @@ async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, An
         return final_piece
 
     # Tool round limit
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = now_local()
     final_piece = (
         f"System - [ToolRoundLimit] [{ts}] "
         f"max_tool_rounds ({cfg.max_tool_rounds}) reached without a final text reply. "

@@ -701,13 +701,30 @@
     return ph;
   }
 
+  /** Parse ISO 8601 string like "2026-06-12T11:28:22+08:00" into display form. */
+  function parseServerTime(isoStr) {
+    if (!isoStr || typeof isoStr !== 'string') return null;
+    // Extract: date, time, tz-offset from "YYYY-MM-DDTHH:MM:SS±HH:MM"
+    var m = isoStr.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})([+-]\d{2}:\d{2})$/);
+    if (!m) return isoStr; // fallback: return as-is
+    return m[1] + ' ' + m[2] + ' UTC' + m[3];
+  }
+
   function chatTimezoneLabel() {
     var off = -new Date().getTimezoneOffset() / 60;
     return 'UTC' + (off >= 0 ? '+' : '') + off;
   }
 
+  /** optDate: ISO 8601 string (server_time) | Date object | null (use browser time) */
   function formatChatTimestamp(optDate) {
-    var d = optDate && optDate instanceof Date ? optDate : new Date();
+    if (typeof optDate === 'string' && optDate) {
+      var parsed = parseServerTime(optDate);
+      if (parsed) return parsed;
+    }
+    if (optDate && optDate instanceof Date) {
+      return optDate.toLocaleString(undefined, { hour12: false }) + ' (' + chatTimezoneLabel() + ')';
+    }
+    var d = new Date();
     return d.toLocaleString(undefined, { hour12: false }) + ' (' + chatTimezoneLabel() + ')';
   }
 
@@ -883,8 +900,8 @@
     addBubble('user', escHtml(text).replace(/\n/g, '<br>'));
   }
 
-  function addUser(text) {
-    var ts = addTimestampRow();
+  function addUser(text, serverTime) {
+    var ts = addTimestampRow(serverTime);
     pushHistory({ k: 'timestamp', text: ts });
     renderUser(text);
     pushHistory({ k: 'user', text: text });
@@ -1051,7 +1068,7 @@
       return;
     }
     if (t === 'user') {
-      addUser(ev.text || '');
+      addUser(ev.text || '', ev.server_time);
       return;
     }
     if (t === 'infer_begin') {
@@ -1066,7 +1083,7 @@
       streamDiv = null;
       inferThreadEl = document.createElement('div');
       inferThreadEl.className = 'infer-thread';
-      var tsInfer = formatChatTimestamp();
+      var tsInfer = formatChatTimestamp(ev.server_time);
       var tsHead = document.createElement('div');
       tsHead.className = 'infer-thread-ts';
       tsHead.textContent = tsInfer;

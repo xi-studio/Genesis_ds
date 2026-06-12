@@ -12,10 +12,10 @@ import inspect
 import io
 import os
 from contextlib import redirect_stdout
-from datetime import datetime
 
 from agent.config import Config
 from agent.output import say
+from agent.timestamp import now_local
 import agent.ui_stub as _us
 
 
@@ -41,7 +41,7 @@ async def run_exec_source_once(source: str, exec_globals: dict) -> str:
         drain_triggers_to_consciousness()
         note = (
             "System - [ExecBatchInterrupted] "
-            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+            f"[{now_local()}] "
             "Human message(s) arrived — this exec was skipped "
             "(re-run in the next round if needed).\n\n"
         )
@@ -54,7 +54,7 @@ async def run_exec_source_once(source: str, exec_globals: dict) -> str:
         return "(empty code)"
     if len(src) > cfg.max_exec_source_chars:
         err = (
-            f"System - [ExecError] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+            f"System - [ExecError] [{now_local()}] "
             f"/exec block too large ({len(src)} chars, "
             f"max {cfg.max_exec_source_chars}). Use the read_file tool or open() instead of pasting."
         )
@@ -81,7 +81,7 @@ async def run_exec_source_once(source: str, exec_globals: dict) -> str:
                 "use open() instead of inlining the file.]"
             )
         err = (
-            f"System - [ExecError] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+            f"System - [ExecError] [{now_local()}] "
             f"{type(e).__name__}: {detail}{hint}"
         )
         say(f"  {err}")

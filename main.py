@@ -15,6 +15,7 @@ import core_loop  # noqa: E402 — same-directory entry point
 from agent.config import Config
 from agent.output import say
 from agent.host_primitives import trigger, _cancel_infer_if_running
+from agent.timestamp import now_local
 import agent.ui_stub as _us
 
 
@@ -82,7 +83,7 @@ async def _websocket_handler(request: "object") -> "object":
             _us.web_ws_clients.add(ws)
     try:
         cfg = Config.get()
-        await _us.emit_ui_event({"event": "hello", "model": cfg.model})
+        await _us.emit_ui_event({"event": "hello", "model": cfg.model, "server_time": now_local()})
         async for msg in ws:
             if msg.type == web.WSMsgType.TEXT:
                 try:
@@ -150,7 +151,7 @@ async def _ui_session(
             _us.ui_clients.add(writer)
     try:
         cfg = Config.get()
-        await _us.emit_ui_event({"event": "hello", "model": cfg.model})
+        await _us.emit_ui_event({"event": "hello", "model": cfg.model, "server_time": now_local()})
         while True:
             raw = await reader.readline()
             if not raw:
@@ -216,7 +217,7 @@ async def _dispatch_ui_message(msg: dict) -> None:
     if cmd == "chat":
         text = (msg.get("text") or "").strip()
         if text:
-            await _us.emit_ui_event({"event": "user", "text": text})
+            await _us.emit_ui_event({"event": "user", "text": text, "server_time": now_local()})
             trigger(f"[Human] {text}")
     elif cmd in ("cancel", "stop"):
         _cancel_infer_if_running()
