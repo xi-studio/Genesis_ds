@@ -9,11 +9,10 @@ import asyncio
 import signal
 import sys
 import threading
-from datetime import datetime
-
 from agent.config import Config
 from agent.consciousness import append
 from agent.output import say
+from agent.timestamp import now_local
 import agent.ui_stub as _us
 
 
@@ -104,7 +103,7 @@ def drain_triggers_to_consciousness() -> tuple[int, bool]:
         return (0, False)
     merged = "\n".join(msgs)
     had_human = "[Human]" in merged
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = now_local()
     append(f"System - [Trigger] [{ts}] {merged}\n\n")
     say(
         f"  [trigger → consciousness] {len(msgs)} message(s) before infer, {len(merged)} chars"

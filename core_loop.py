@@ -22,7 +22,7 @@ import asyncio
 import os
 import re
 import sys
-from datetime import datetime
+from agent.timestamp import now_local
 
 from agent.config import Config
 from agent.output import say
@@ -175,7 +175,7 @@ async def main():
 
         # Log assistant turn: infer persists via extend_messages (reasoning_content only when tool_calls).
         if (ai_text or "").strip():
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ts = now_local()
             tag = "[Being]"
             if (ai_text or "").strip().startswith("[Error]"):
                 _append_digital_being(ai_text, ts, tag)
@@ -251,7 +251,7 @@ async def main():
         while not trigger_inbox.empty():
             msgs.append(trigger_inbox.get_nowait())
         merged = "\n".join(msgs)
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ts = now_local()
         append(f"System - [Trigger] [{ts}] {merged}\n\n", role="user")
         say(f"--- triggered ({len(msgs)} msgs, {len(merged)} chars) ---\n{merged}\n---")
 
