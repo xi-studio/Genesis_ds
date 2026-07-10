@@ -5,8 +5,8 @@ Registers handlers with ``agent.tools.dispatch``.
 """
 from __future__ import annotations
 
+import difflib
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -44,22 +44,28 @@ TOOL_DEFINITIONS = [
         code=_p("string", "Python code to execute"),
     ),
     _tool("read_file",
-        "Read a file and return its contents. Supports line offset and limit.",
+        "Read a text file. Supports 1-based line offset/limit and optional line numbers.",
         path=_p("string", "File path to read"),
-        offset=_p("integer", "Line number to start from (1-based, default 1)", required=False),
-        limit=_p("integer", "Max lines to return (default all)", required=False),
+        offset=_p("integer", "Start line number, 1-based (default 1)", required=False),
+        limit=_p("integer", "Max lines to return (default all remaining lines)", required=False),
+        line_numbers=_p("boolean", "If true, prefix each returned line with its line number", required=False),
     ),
     _tool("write_file",
-        "Write content to a file, creating parent directories if needed.",
+        "Write text to a file, creating parent directories if needed. Supports overwrite/append/prepend/create modes.",
         path=_p("string", "File path to write"),
         content=_p("string", "Content to write"),
+        mode=_p("string", "Write mode: overwrite (default), append, prepend, or create", enum=["overwrite", "append", "prepend", "create"], required=False),
+        show_diff=_p("boolean", "If true, include a truncated unified diff for text changes", required=False),
     ),
     _tool("edit_file",
-        "Replace old_text with new_text in a file. Fails if old_text not found.",
+        "Replace text in a file. Supports unique match, nth occurrence, or replace-all with optional count guard.",
         path=_p("string", "File path to edit"),
-        old_text=_p("string", "Text to find (must be unique in file)"),
+        old_text=_p("string", "Exact text to replace"),
         new_text=_p("string", "Replacement text"),
         replace_all=_p("boolean", "Replace all occurrences (default false)", required=False),
+        occurrence=_p("integer", "When replace_all=false and old_text appears multiple times, replace this 1-based occurrence", required=False),
+        expected_count=_p("integer", "Optional safety guard: require old_text to appear exactly this many times", required=False),
+        context_lines=_p("integer", "Unified diff context lines (default 3, range 0-20)", required=False),
     ),
     _tool("shell",
         "Run a shell command; returns stdout+stderr. Long jobs: nohup + log + &; "
@@ -121,85 +127,274 @@ async def _handle_exec(args: dict[str, Any]) -> str:
 # ── File-operation helpers ──────────────────────────────────────────────
 
 _MAX_OUTPUT = 32000
+_MAX_DIFF_CHARS = 12000
 
-def _read_path(path: str) -> str:
-    """Read a file, return truncated content or error."""
-    p = Path(path)
-    if not p.exists():
-        return f"Error: File not found: {path}"
-    if not p.is_file():
-        return f"Error: Not a file: {path}"
-    return p.read_text(encoding="utf-8", errors="replace")
 
 def _truncate(s: str, max_chars: int = _MAX_OUTPUT) -> str:
-    return s if len(s) <= max_chars else s[:max_chars] + "\n... (truncated)"
+    return s if len(s) <= max_chars else s[:max_chars] + f"\n... (truncated, {len(s) - max_chars} chars omitted)"
+
+
+def _to_int(value: Any, default: int, *, lo: int | None = None, hi: int | None = None) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = default
+    if lo is not None:
+        n = max(lo, n)
+    if hi is not None:
+        n = min(hi, n)
+    return n
+
+
+def _read_text(path: str) -> tuple[bool, str]:
+    """Read a UTF-8-ish text file. Return (ok, content_or_error)."""
+    if not str(path or "").strip():
+        return False, "Error: path is required"
+    p = Path(path).expanduser()
+    if not p.exists():
+        return False, f"Error: File not found: {path}"
+    if not p.is_file():
+        return False, f"Error: Not a file: {path}"
+    try:
+        return True, p.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return False, f"Error: {type(e).__name__}: {e}"
+
+
+def _normalize_lines_arg(args: dict[str, Any]) -> tuple[int, int | None]:
+    offset = _to_int(args.get("offset"), 1, lo=1)
+    raw_limit = args.get("limit")
+    limit = None if raw_limit is None else _to_int(raw_limit, 0, lo=0)
+    return offset, limit
+
+
+def _unified_diff(old: str, new: str, path: str, *, context_lines: int = 3) -> str:
+    context = _to_int(context_lines, 3, lo=0, hi=20)
+    diff = "".join(
+        difflib.unified_diff(
+            old.splitlines(keepends=True),
+            new.splitlines(keepends=True),
+            fromfile=f"{path} (before)",
+            tofile=f"{path} (after)",
+            n=context,
+        )
+    )
+    return _truncate(diff, _MAX_DIFF_CHARS) if diff else "(no textual diff)"
+
+
+def _write_text_atomic(path: str, content: str) -> None:
+    p = Path(path).expanduser()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
 
 
 def _handle_read_file(args: dict[str, Any]) -> str:
-    path = args.get("path", "")
-    offset = args.get("offset", 1)
-    limit = args.get("limit")
-    try:
-        lines = _read_path(path).splitlines()
-        if lines and lines[0].startswith("Error:"):
-            return lines[0]
-        selected = lines[offset - 1:]
-        if limit is not None:
-            selected = selected[:limit]
-        result = "\n".join(selected)
-        return _truncate(result) if result else "(empty file or offset beyond end)"
-    except Exception as e:
-        return f"Error: {type(e).__name__}: {e}"
+    path = str(args.get("path") or "")
+    offset, limit = _normalize_lines_arg(args)
+    line_numbers = bool(args.get("line_numbers", False))
+    ok, content = _read_text(path)
+    if not ok:
+        return content
+
+    lines = content.splitlines()
+    selected = lines[offset - 1:]
+    if limit is not None:
+        selected = selected[:limit]
+    if line_numbers:
+        selected = [f"{line_no}| {line}" for line_no, line in enumerate(selected, start=offset)]
+
+    result = "\n".join(selected)
+    if not result:
+        return "(empty file or offset beyond end)"
+
+    total = len(lines)
+    end_line = offset + len(selected) - 1
+    meta: list[str] = []
+    if limit is not None and end_line < total:
+        meta.append(f"(pagination: offset={offset}, limit={limit}, total_lines={total})")
+    elif offset > 1:
+        meta.append(f"(pagination: offset={offset}, total_lines={total})")
+    out = _truncate(result)
+    if meta:
+        out += "\n\n" + "\n".join(meta)
+    return out
+
 
 def _handle_write_file(args: dict[str, Any]) -> str:
-    path = args.get("path", "")
-    content = args.get("content", "")
+    path = str(args.get("path") or "")
+    content = str(args.get("content") or "")
+    mode = str(args.get("mode") or "overwrite").strip().lower()
+    show_diff = bool(args.get("show_diff", False))
+    if mode not in {"overwrite", "append", "prepend", "create"}:
+        return f"Error: unsupported mode '{mode}' (expected overwrite, append, prepend, or create)"
+    if not path.strip():
+        return "Error: path is required"
+
+    p = Path(path).expanduser()
+    existed = p.exists()
+    if existed and not p.is_file():
+        return f"Error: Not a file: {path}"
+    if mode == "create" and existed:
+        return f"Error: File already exists: {path}"
+
+    old = ""
+    if existed:
+        ok, old_or_err = _read_text(path)
+        if not ok:
+            return old_or_err
+        old = old_or_err
+
+    if mode in {"overwrite", "create"}:
+        new = content
+    elif mode == "append":
+        new = old + content
+    else:  # prepend
+        new = content + old
+
     try:
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
-        return f"OK: Written {len(content)} chars to {path}"
+        _write_text_atomic(path, new)
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
+
+    action = "Created" if (mode == "create" or not existed) else {"overwrite": "Written", "append": "Appended", "prepend": "Prepended"}[mode]
+    msg = f"OK: {action} {len(content)} chars to {path} (final size {len(new)} chars)"
+    if show_diff:
+        msg += "\n\n" + _unified_diff(old, new, path)
+    return msg
+
+
+def _replace_nth(content: str, old_text: str, new_text: str, occurrence: int) -> str:
+    if occurrence < 1:
+        raise ValueError("occurrence must be >= 1")
+    start = -1
+    cursor = 0
+    for _ in range(occurrence):
+        start = content.find(old_text, cursor)
+        if start < 0:
+            raise ValueError(f"old_text occurrence {occurrence} not found")
+        cursor = start + len(old_text)
+    return content[:start] + new_text + content[start + len(old_text):]
+
 
 def _handle_edit_file(args: dict[str, Any]) -> str:
-    path = args.get("path", "")
-    old_text = args.get("old_text", "")
-    new_text = args.get("new_text", "")
-    replace_all = args.get("replace_all", False)
+    path = str(args.get("path") or "")
+    old_text = str(args.get("old_text") or "")
+    new_text = str(args.get("new_text") or "")
+    replace_all = bool(args.get("replace_all", False))
+    occurrence_arg = args.get("occurrence")
+    expected_count_arg = args.get("expected_count")
+    context_lines = _to_int(args.get("context_lines"), 3, lo=0, hi=20)
+
+    if not path.strip():
+        return "Error: path is required"
+    if old_text == "":
+        return "Error: old_text must not be empty"
+
+    ok, content = _read_text(path)
+    if not ok:
+        return content
+
+    count = content.count(old_text)
+    if expected_count_arg is not None:
+        expected = _to_int(expected_count_arg, -1, lo=0)
+        if count != expected:
+            return f"Error: expected old_text to appear {expected} time(s), found {count}"
+    if count == 0:
+        return f"Error: old_text not found in {path}"
+
     try:
-        content = _read_path(path)
-        if content.startswith("Error:"):
-            return content
-        if old_text not in content:
-            return f"Error: old_text not found in {path}"
-        count = content.count(old_text)
-        if not replace_all and count > 1:
-            return f"Error: old_text found {count} times in {path} (not unique). Use replace_all=true or provide more context."
-        new_content = content.replace(old_text, new_text) if replace_all else content.replace(old_text, new_text, 1)
-        Path(path).write_text(new_content, encoding="utf-8")
-        return f"OK: Replaced {count} occurrence(s) in {path}"
+        if replace_all:
+            new_content = content.replace(old_text, new_text)
+            replaced = count
+        else:
+            if occurrence_arg is not None:
+                occurrence = _to_int(occurrence_arg, 1, lo=1)
+                if occurrence > count:
+                    return f"Error: occurrence {occurrence} requested, but old_text appears {count} time(s)"
+                new_content = _replace_nth(content, old_text, new_text, occurrence)
+                replaced = 1
+            else:
+                if count > 1:
+                    return (
+                        f"Error: old_text found {count} times in {path} (not unique). "
+                        "Use replace_all=true, occurrence=N, expected_count, or provide more context."
+                    )
+                new_content = content.replace(old_text, new_text, 1)
+                replaced = 1
+        _write_text_atomic(path, new_content)
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
 
-def _handle_shell(args: dict[str, Any]) -> str:
+    diff = _unified_diff(content, new_content, path, context_lines=context_lines)
+    return f"OK: Replaced {replaced} occurrence(s) in {path}\n\n{diff}"
+
+
+async def _handle_shell(args: dict[str, Any]) -> str:
     command = args.get("command", "")
     timeout = args.get("timeout", 30)
     cwd = args.get("cwd")
     if not command.strip():
         return "(empty command)"
+
+    import asyncio
+
+    proc = None
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout, cwd=cwd)
-        output = result.stdout
-        if result.stderr:
-            output += f"\nSTDERR:\n{result.stderr}"
-        if result.returncode != 0:
-            output += f"\nReturn code: {result.returncode}"
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+        )
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            _kill_proc(proc)
+            await _reap(proc)
+            return f"Error: Command timed out after {timeout}s"
+
+        stdout = (stdout_b or b"").decode("utf-8", errors="replace")
+        stderr = (stderr_b or b"").decode("utf-8", errors="replace")
+        output = stdout
+        if stderr:
+            output += f"\nSTDERR:\n{stderr}"
+        if proc.returncode not in (0, None):
+            output += f"\nReturn code: {proc.returncode}"
         return _truncate(output) if output.strip() else "(no output)"
-    except subprocess.TimeoutExpired:
-        return f"Error: Command timed out after {timeout}s"
+    except asyncio.CancelledError:
+        # User pressed Stop while the command was running — kill the child process
+        # so it doesn't keep running in the background, then propagate cancel.
+        if proc is not None:
+            _kill_proc(proc)
+            await _reap(proc)
+        raise
     except Exception as e:
+        if proc is not None:
+            _kill_proc(proc)
         return f"Error: {type(e).__name__}: {e}"
+
+
+def _kill_proc(proc) -> None:
+    """Best-effort terminate→kill of an asyncio subprocess."""
+    try:
+        if proc.returncode is None:
+            proc.terminate()
+    except (ProcessLookupError, Exception):
+        pass
+    try:
+        if proc.returncode is None:
+            proc.kill()
+    except (ProcessLookupError, Exception):
+        pass
+
+
+async def _reap(proc) -> None:
+    """Wait briefly for the killed process to exit, ignoring errors."""
+    import asyncio
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=2.0)
+    except (asyncio.TimeoutError, Exception):
+        pass
 
 def _handle_grep(args: dict[str, Any]) -> str:
     return run_grep(args)

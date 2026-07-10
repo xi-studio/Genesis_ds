@@ -51,7 +51,10 @@ def _db():
     """Context manager: open DB, init schema, yield conn, commit, close."""
     path = _db_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)
+    # WAL + busy_timeout for cross-module concurrency (see consciousness._db()).
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS core_memory_entries (
