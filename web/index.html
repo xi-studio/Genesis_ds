@@ -24,6 +24,27 @@
       --red: #e84057;
       --amber: #d4a017;
       --panel-bg: #020c1a;
+      --user-bg: rgba(255,255,255,0.04);
+      --code-bg: #0c0c10;
+      --sunken-bg: rgba(0, 0, 0, 0.22);
+    }
+    /* 护眼浅色主题：柔和暖灰白底，降低对比度疲劳，非刺眼纯白 */
+    :root[data-theme="light"] {
+      --bg: #f4f2ec;
+      --bg-raised: #faf8f3;
+      --text: #3a3a42;
+      --text-dim: #8a8a96;
+      --accent: #0a9d82;
+      --accent-dim: rgba(10, 157, 130, 0.10);
+      --accent-glow: rgba(10, 157, 130, 0.22);
+      --border: rgba(60,55,45,0.12);
+      --border-active: rgba(60,55,45,0.22);
+      --red: #c8344a;
+      --amber: #9a7610;
+      --panel-bg: #eef1f4;
+      --user-bg: rgba(10, 157, 130, 0.07);
+      --code-bg: #ece9e1;
+      --sunken-bg: rgba(60, 55, 45, 0.05);
     }
     * { box-sizing: border-box; }
     body {
@@ -58,9 +79,24 @@
     .brand-icon svg { display: block; }
     .header-meta {
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 4px;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+    }
+    .theme-toggle {
+      background: var(--accent-dim);
+      border: 1px solid var(--border-active);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 3px 8px;
+      font-size: 0.85rem;
+      line-height: 1;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .theme-toggle:hover {
+      background: var(--accent-glow);
+      border-color: var(--accent);
     }
     .last-prompt {
       font-family: 'JetBrains Mono', monospace;
@@ -84,6 +120,23 @@
     }
     .title-area .status {
       margin-left: 4px;
+    }
+    .model-badge {
+      margin-left: 8px;
+      padding: 2px 8px;
+      border: 1px solid var(--border-active);
+      border-radius: 10px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      font-weight: 500;
+      letter-spacing: 0.4px;
+      white-space: nowrap;
+      max-width: 22vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 0;
     }
     .status {
       font-family: 'JetBrains Mono', monospace;
@@ -153,7 +206,7 @@
     }
     .msg.user {
       align-self: flex-end;
-      background: rgba(255,255,255,0.04);
+      background: var(--user-bg);
       border: 1px solid var(--border);
       color: var(--text);
     }
@@ -201,7 +254,7 @@
       margin-bottom: 10px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: rgba(0, 0, 0, 0.22);
+      background: var(--sunken-bg);
       overflow: hidden;
     }
     .msg-thinking-fold:not([open]) {
@@ -325,7 +378,7 @@
     .msg p { margin: 0 0 8px 0; }
     .msg p:last-child { margin-bottom: 0; }
     .msg pre {
-      background: #0c0c10;
+      background: var(--code-bg);
       padding: 12px;
       border-radius: 4px;
       overflow-x: auto;
@@ -517,9 +570,11 @@
     <div class="title-area">
       <span class="brand-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="22" height="22"><circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="50" cy="50" r="8" fill="currentColor"/></svg></span>
       <h1>Infero</h1>
+      <span class="model-badge" id="model-badge" title="当前使用的模型">—</span>
       <span class="status" id="status">Disconnected</span>
     </div>
     <div class="header-meta">
+      <button class="theme-toggle" id="theme-toggle" title="切换深色 / 浅色主题" aria-label="切换主题">🌙</button>
       <span class="last-prompt" id="last-prompt-k" title="上一轮输入 token（k 显示）；悬停为精确值（usage.prompt_tokens）">上轮 · —</span>
     </div>
   </header>
@@ -539,6 +594,45 @@
   const chat = document.getElementById('chat-box');
   const input = document.getElementById('input');
   const statusEl = document.getElementById('status');
+  // --- Theme (dark/light) with persistence ---
+  (function initTheme() {
+    const saved = localStorage.getItem('infero-theme');
+    if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  })();
+  function applyThemeButton() {
+    const btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    btn.textContent = isLight ? '☀️' : '🌙';
+    btn.title = isLight ? '切换到深色主题' : '切换到浅色主题';
+  }
+  function toggleTheme() {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    if (isLight) {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('infero-theme', 'dark');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'light');
+      localStorage.setItem('infero-theme', 'light');
+    }
+    applyThemeButton();
+  }
+  (function bindTheme() {
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.addEventListener('click', toggleTheme);
+    applyThemeButton();
+  })();
+  const modelBadgeEl = document.getElementById('model-badge');
+  let currentModel = '';
+  function setModel(name) {
+    if (name && typeof name === 'string') {
+      currentModel = name;
+      if (modelBadgeEl) {
+        modelBadgeEl.textContent = name;
+        modelBadgeEl.title = '当前使用的模型：' + name;
+      }
+    }
+  }
   const lastPromptEl = document.getElementById('last-prompt-k');
   const btnClearHistory = document.getElementById('btn-clear-history');
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1064,7 +1158,8 @@
   function _onEvent_inner(ev) {
     const t = ev.event;
     if (t === 'hello') {
-      statusEl.textContent = 'Ready · ' + (ev.model || '');
+      setModel(ev.model || '');
+      statusEl.textContent = 'Ready';
       return;
     }
     if (t === 'user') {

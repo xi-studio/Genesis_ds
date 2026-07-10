@@ -149,6 +149,8 @@ _CFG_FIELDS: list[tuple] = [
     ("context_window_tail_tokens", ("context_window_tail_tokens",), None, int, 100_000, 1024),
     # Tools
     ("max_tool_rounds",  ("max_tool_rounds",),   None,            int,  20,         1),
+    ("infer_max_retries", ("infer_max_retries",), None,           int,  3,          0),
+    ("infer_retry_base_sec", ("infer_retry_base_sec",), None,     float, 1.0,       0.0),
     # Core memory
     ("core_memory_max_tokens", ("core_memory_max_tokens",), None, int, 20_000, 128),
     # exec
@@ -213,6 +215,8 @@ class Config:
     # --- Function calling ---
     tool_definitions: list[dict[str, Any]] = field(default_factory=list)
     max_tool_rounds: int = 20
+    infer_max_retries: int = 3
+    infer_retry_base_sec: float = 1.0
 
     # --- Core memory ---
     core_memory_max_tokens: int = 20_000

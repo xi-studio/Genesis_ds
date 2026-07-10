@@ -21,7 +21,13 @@ import asyncio
 import json
 from typing import Any
 
-from openai import BadRequestError
+from openai import (
+    BadRequestError,
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+    InternalServerError,
+)
 
 from agent.config import Config
 from agent.timestamp import now_local
@@ -137,17 +143,80 @@ def _extract_reasoning_and_content(obj: Any) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Transient-error retry (exponential backoff)
+# ---------------------------------------------------------------------------
+
+# Transient errors worth retrying. BadRequestError / AuthenticationError are
+# permanent (retrying won't help). CancelledError must propagate immediately.
+_RETRYABLE_ERRORS = (
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+    InternalServerError,
+)
+
+
+def _retry_after_seconds(exc: Any, attempt: int, base: float) -> float:
+    """Backoff seconds for this attempt. RateLimit honors Retry-After if present."""
+    # Try Retry-After header on rate-limit/status errors
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        headers = getattr(resp, "headers", None)
+        if headers:
+            for key in ("retry-after", "Retry-After"):
+                val = None
+                try:
+                    val = headers.get(key)
+                except Exception:
+                    val = None
+                if val:
+                    try:
+                        return max(0.0, float(val))
+                    except (TypeError, ValueError):
+                        pass
+    # Exponential backoff: base * 2^attempt, capped at 30s
+    return min(30.0, float(base) * (2 ** attempt))
+
+
+async def _with_retry(make_call, cfg: Config):
+    """Invoke ``make_call()`` (a zero-arg coroutine factory) with retry on transient
+    errors. CancelledError propagates immediately; permanent errors are not retried."""
+    max_retries = max(0, int(getattr(cfg, "infer_max_retries", 3)))
+    base = float(getattr(cfg, "infer_retry_base_sec", 1.0))
+    attempt = 0
+    while True:
+        try:
+            return await make_call()
+        except asyncio.CancelledError:
+            raise  # user cancel must not be swallowed
+        except _RETRYABLE_ERRORS as e:
+            if attempt >= max_retries:
+                say(f"  [infer retry] gave up after {attempt} retr{'y' if attempt==1 else 'ies'}: {type(e).__name__}", flush=True)
+                raise
+            delay = _retry_after_seconds(e, attempt, base)
+            attempt += 1
+            say(f"  [infer retry] {type(e).__name__} — retry {attempt}/{max_retries} in {delay:.1f}s", flush=True)
+            await asyncio.sleep(delay)
+
+
+# ---------------------------------------------------------------------------
 # Stream creation
 # ---------------------------------------------------------------------------
 
 async def _create_stream(client, **kwargs) -> Any:
-    """Create a stream, with optional ``stream_options`` for usage tracking."""
-    try:
-        return await client.chat.completions.create(
-            **kwargs, stream_options={"include_usage": True}
-        )
-    except (TypeError, BadRequestError):
-        return await client.chat.completions.create(**kwargs)
+    """Create a stream, with optional ``stream_options`` for usage tracking.
+    Retries transient errors via :func:`_with_retry`."""
+    cfg = Config.get()
+
+    async def _call():
+        try:
+            return await client.chat.completions.create(
+                **kwargs, stream_options={"include_usage": True}
+            )
+        except (TypeError, BadRequestError):
+            return await client.chat.completions.create(**kwargs)
+
+    return await _with_retry(_call, cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -529,7 +598,7 @@ async def _infer_nonstream(client, cfg: Config, messages: list[dict[str, Any]],
                            *, infer_window: list[dict[str, Any]] | None = None) -> str | tuple:
     """Single non-streaming completion. Returns str (plain) or tuple (tool round)."""
     kw = _api_kwargs(cfg, messages, stream=False, tools=tools, _extra=_extra)
-    resp = await client.chat.completions.create(**kw)
+    resp = await _with_retry(lambda: client.chat.completions.create(**kw), cfg)
     usage = getattr(resp, "usage", None)
     ch = resp.choices[0] if resp.choices else None
     raw_msg = ch.message if ch else None

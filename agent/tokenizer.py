@@ -1,15 +1,32 @@
 """
-Heuristic token estimate in line with DeepSeek-V3-style BPE (no extra deps).
+Token counting — exact via model tokenizers (HF ``tokenizers`` Rust lib), with a
+heuristic fallback when a tokenizer file is unavailable.
 
-Splits **chars per token** for CJK-style codepoints vs Latin / symbols / whitespace,
-which tracks ``tokenizer.json`` far better than one global ``len / 2.5``. Defaults
-were tuned on short mixed EN/ZH/code strings against the official vocab; API
-``usage.prompt_tokens`` still refines both ratios via :func:`update_ratio_from_usage`.
+Each model family ships a ``tokenizer.json`` under ``agent/tokenizer_data/``:
+* ``deepseek.json`` — deepseek-ai/DeepSeek-V3
+* ``glm.json``      — zai-org/GLM-4.5 (GLM-5.x family)
+
+``count_tokens`` selects the tokenizer for the **current configured model**
+(``Config.model``, optionally overridden by ``Config.tokenizer_reference_model``),
+caches the loaded instance, and falls back to the CJK/Latin heuristic when no
+tokenizer matches or loading fails. This makes counts **per-model accurate** and
+removes the cross-model calibration pollution of the old global-ratio approach.
+
+Heuristic (fallback only): CJK-style codepoints vs Latin/symbols/whitespace with
+separate chars-per-token ratios; ``update_ratio_from_usage`` still refines the
+fallback ratios from API ``usage.prompt_tokens`` so even the no-tokenizer path
+improves over time.
 """
 from __future__ import annotations
 
-# Mutable; tuned vs deepseek_v3 tokenizer.json on mixed EN/ZH/code snippets (mean rel
-# error ~28% on a small panel; pathological repeats still diverge without real BPE).
+import os
+import threading
+from typing import Any
+
+# ---------------------------------------------------------------------------
+# Heuristic fallback (used only when no tokenizer file is available)
+# ---------------------------------------------------------------------------
+
 _CJK_CHARS_PER_TOKEN: float = 1.9
 _OTHER_CHARS_PER_TOKEN: float = 4.0
 
@@ -45,10 +62,11 @@ def _raw_estimate(text: str) -> float:
 
 
 def update_ratio_from_usage(prompt_text: str, prompt_tokens: int) -> None:
-    """Scale both ratios when the API reports prompt token usage.
+    """Refine heuristic fallback ratios from API prompt-token usage.
 
-    ``prompt_text`` must be the same string used for local length estimates (e.g.
-    ``json.dumps(messages)`` for infer calibration).
+    No-op effect on the exact-tokenizer path (which doesn't use these ratios),
+    but keeps the fallback path self-correcting. Safe to call regardless of which
+    counting path is active.
     """
     global _CJK_CHARS_PER_TOKEN, _OTHER_CHARS_PER_TOKEN
     if not prompt_text or prompt_tokens <= 0:
@@ -65,8 +83,101 @@ def update_ratio_from_usage(prompt_text: str, prompt_tokens: int) -> None:
     _OTHER_CHARS_PER_TOKEN = max(_OTHER_PT_MIN, min(_OTHER_PT_MAX, nother))
 
 
+# ---------------------------------------------------------------------------
+# Exact tokenizer selection (HF ``tokenizers`` Rust lib)
+# ---------------------------------------------------------------------------
+
+_TOKENIZER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tokenizer_data")
+
+# model-name substring (lowercased) → tokenizer.json filename. First match wins.
+_MODEL_TOKENIZER_MAP: tuple[tuple[str, str], ...] = (
+    ("deepseek", "deepseek.json"),
+    ("glm", "glm.json"),
+)
+
+_lock = threading.Lock()
+_tok_cache: dict[str, Any] = {}      # filename → Tokenizer | None
+_tokenizers_import_failed = False    # remember if the lib itself is unavailable
+
+
+def _current_model_name() -> str:
+    """Read the active model name from Config (tokenizer_reference_model overrides)."""
+    try:
+        from agent.config import Config
+        cfg = Config.get()
+        ref = (getattr(cfg, "tokenizer_reference_model", "") or "").strip()
+        # Only honor the override when it actually maps to a known family;
+        # otherwise prefer the real runtime model so counts match the live API.
+        if ref and _filename_for_model(ref):
+            return ref
+        return (getattr(cfg, "model", "") or "").strip()
+    except Exception:
+        return ""
+
+
+def _filename_for_model(model_name: str) -> str | None:
+    name = (model_name or "").lower()
+    for key, fname in _MODEL_TOKENIZER_MAP:
+        if key in name:
+            return fname
+    return None
+
+
+def _load_tokenizer(filename: str) -> Any | None:
+    """Lazy-load and cache a Tokenizer by filename; None if unavailable."""
+    global _tokenizers_import_failed
+    if filename in _tok_cache:
+        return _tok_cache[filename]
+    with _lock:
+        if filename in _tok_cache:
+            return _tok_cache[filename]
+        tok = None
+        if not _tokenizers_import_failed:
+            path = os.path.join(_TOKENIZER_DIR, filename)
+            if os.path.isfile(path):
+                try:
+                    from tokenizers import Tokenizer
+                    tok = Tokenizer.from_file(path)
+                except ImportError:
+                    _tokenizers_import_failed = True
+                    tok = None
+                except Exception:
+                    tok = None
+        _tok_cache[filename] = tok
+        return tok
+
+
+def _tokenizer_for_current_model() -> Any | None:
+    fname = _filename_for_model(_current_model_name())
+    if not fname:
+        return None
+    return _load_tokenizer(fname)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def count_tokens(text: str) -> int:
-    """Approximate token count for ``text``."""
+    """Exact token count for ``text`` via the current model's tokenizer.
+
+    Falls back to the CJK/Latin heuristic when no tokenizer file matches the
+    configured model or the ``tokenizers`` library is unavailable.
+    """
     if not text:
         return 0
+    tok = _tokenizer_for_current_model()
+    if tok is not None:
+        try:
+            return max(1, len(tok.encode(text).ids))
+        except Exception:
+            pass  # fall through to heuristic
     return max(1, round(_raw_estimate(text)))
+
+
+def active_counter() -> str:
+    """Diagnostic: which counting path is active for the current model."""
+    fname = _filename_for_model(_current_model_name())
+    if fname and _load_tokenizer(fname) is not None:
+        return f"exact:{fname}"
+    return "heuristic"

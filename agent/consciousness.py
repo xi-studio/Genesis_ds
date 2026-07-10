@@ -44,7 +44,12 @@ def _db_path() -> str:
 def _db():
     path = _db_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)
+    # WAL: readers don't block writers and vice-versa — needed because
+    # consciousness and core_memory hold separate locks but write the same file.
+    # busy_timeout: wait-and-retry on contention instead of raising "database is locked".
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS consciousness_messages (
@@ -133,7 +138,7 @@ def _window_trigger_total(msgs: list[dict[str, Any]]) -> int:
     return max(0, int(non_window_api + window_est * window_scale))
 
 
-def _single_message_tokens(m: dict[str, Any]) -> int:
+def _compute_message_tokens(m: dict[str, Any]) -> int:
     n = 0
     c = m.get("content")
     if isinstance(c, str) and c:
@@ -149,6 +154,18 @@ def _single_message_tokens(m: dict[str, Any]) -> int:
     if m.get("role") == "tool" and (tid := m.get("tool_call_id")):
         n += count_tokens(str(tid))
     return max(n, 1)
+
+
+def _single_message_tokens(m: dict[str, Any]) -> int:
+    """Token size of one message. Uses the cached ``_tokens`` field when present
+    (messages are immutable once stored, so the count never changes), otherwise
+    computes it on the fly. Caching is populated at write time in
+    :func:`_normalize_stored_message`."""
+    cached = m.get("_tokens")
+    if isinstance(cached, int) and cached > 0:
+        return cached
+    return _compute_message_tokens(m)
+
 
 
 # ── Boot / Schema ───────────────────────────────────────────────────────
@@ -241,6 +258,12 @@ def _normalize_stored_message(m: dict[str, Any]) -> dict[str, Any]:
             continue
         if v is not None:
             out[k] = v
+
+    # Cache the token size once at write time (messages are immutable in the
+    # append-only log, so this never needs recomputing during trim). Stored under
+    # the ``_tokens`` key, which _strip_infer_keys() removes before the API sees it.
+    out.pop("_tokens", None)
+    out["_tokens"] = _compute_message_tokens(out)
     return out
 
 
