@@ -117,6 +117,17 @@ async def _start_web_server() -> None:
         resp.headers["Cache-Control"] = "no-store, max-age=0"
         return resp
 
+    async def history(request: web.Request) -> web.StreamResponse:
+        """Return the most recent consciousness messages for the chat view."""
+        from agent.consciousness import recent_messages
+
+        try:
+            limit = int(request.query.get("limit", "100"))
+        except (TypeError, ValueError):
+            limit = 100
+        limit = max(1, min(limit, 500))
+        return web.json_response({"messages": recent_messages(limit)})
+
     async def favicon(_request: web.Request) -> web.StreamResponse:
         svg = (
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
@@ -131,6 +142,7 @@ async def _start_web_server() -> None:
 
     app = web.Application()
     app.router.add_get("/", index)
+    app.router.add_get("/api/history", history)
     app.router.add_get("/favicon.ico", favicon)
     app.router.add_get("/ws", _websocket_handler)
     runner = web.AppRunner(app)
@@ -306,7 +318,7 @@ def main() -> int:
                 msg = f"  web: bind {cfg.web_host}:{cfg.web_port} failed: {e}"
                 say(msg, file=sys.stderr, flush=True)
             except ImportError as e:
-                msg = f"  web: aiohttp required — uv add aiohttp ({e})"
+                msg = f"  web: aiohttp required - uv add aiohttp ({e})"
                 say(msg, file=sys.stderr, flush=True)
 
         # Start Control server

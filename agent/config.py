@@ -1,5 +1,5 @@
 """
-Configuration loader and runtime settings for MolAgent core loop.
+Configuration loader and runtime settings for the core loop.
 
 All module-level state lives here. Other modules import ``config`` and read
 attributes from the singleton ``Config.get()``.
@@ -149,6 +149,8 @@ _CFG_FIELDS: list[tuple] = [
     ("context_window_tail_tokens", ("context_window_tail_tokens",), None, int, 100_000, 1024),
     # Tools
     ("max_tool_rounds",  ("max_tool_rounds",),   None,            int,  20,         1),
+    ("infer_max_retries", ("infer_max_retries",), None,           int,  3,          0),
+    ("infer_retry_base_sec", ("infer_retry_base_sec",), None,     float, 1.0,       0.0),
     # Core memory
     ("core_memory_max_tokens", ("core_memory_max_tokens",), None, int, 20_000, 128),
     # exec
@@ -156,6 +158,7 @@ _CFG_FIELDS: list[tuple] = [
     ("max_exec_source_chars", ("max_exec_source_chars",), None, int, 12_000, 1),
     ("exec_batch_interrupt_on_human", ("exec_batch_interrupt_on_human",),
      "CORE_LOOP_EXEC_BATCH_INTERRUPT_ON_HUMAN", bool, False),
+    ("exec_timeout_sec", ("exec_timeout_sec",), "CORE_LOOP_EXEC_TIMEOUT_SEC", float, 120.0, 1.0),
     # Chain gaps
     ("self_continue_gap_sec", ("self_continue_gap_sec",
                                "self_continue_gap_sec_autonomous",
@@ -171,15 +174,21 @@ _CFG_FIELDS: list[tuple] = [
     ("stdin_input",        ("stdin_input",),       "CORE_LOOP_STDIN_INPUT",   bool, True),
 ]
 
-# Env-only overrides (no config key, checked in apply)
+# Env-only overrides (checked in apply()). Semantics: an env var applies ONLY when
+# config.json does not explicitly set any of the field's config keys — config wins,
+# env fills gaps. Tuple: (attr, env_var, gating_config_keys, lo).
+# Note: CORE_LOOP_SELF_CONTINUE_GAP_AUTONOMOUS/INTERACTIVE/FAST were removed — they
+# were never functional (default=None made apply() skip them) and config keys
+# ``self_continue_gap_sec_*`` already cover mode-specific gaps.
 _ENV_OVERRIDES: list[tuple] = [
-    ("self_continue_gap_sec",  "CORE_LOOP_SELF_CONTINUE_GAP_SEC", float, 15.0, 0.0),
-    ("self_continue_gap_sec",  "CORE_LOOP_SELF_CONTINUE_GAP_AUTONOMOUS", float, None, 0.0),
-    ("self_continue_gap_sec",  "CORE_LOOP_SELF_CONTINUE_GAP_INTERACTIVE", float, None, 0.0),
-    ("self_continue_gap_sec",  "CORE_LOOP_SELF_CONTINUE_GAP_FAST", float, None, 0.0),
-    ("sleep_default_sec",      "CORE_LOOP_SLEEP_DEFAULT_SEC", float, None, 0.0),
-    ("sleep_default_sec",      "CORE_LOOP_IDLE_WATCHDOG_SEC", float, None, 0.0),
-    ("sleep_max_sec",          "CORE_LOOP_SLEEP_MAX_SEC", float, None, 1.0),
+    ("self_continue_gap_sec", "CORE_LOOP_SELF_CONTINUE_GAP_SEC",
+     ("self_continue_gap_sec", "self_continue_gap_sec_autonomous",
+      "self_continue_gap_sec_interactive", "self_continue_gap_sec_fast"), 0.0),
+    ("sleep_default_sec", "CORE_LOOP_SLEEP_DEFAULT_SEC",
+     ("sleep_default_sec", "idle_watchdog_sec"), 0.0),
+    ("sleep_default_sec", "CORE_LOOP_IDLE_WATCHDOG_SEC",
+     ("sleep_default_sec", "idle_watchdog_sec"), 0.0),
+    ("sleep_max_sec", "CORE_LOOP_SLEEP_MAX_SEC", ("sleep_max_sec",), 1.0),
 ]
 
 
@@ -213,6 +222,8 @@ class Config:
     # --- Function calling ---
     tool_definitions: list[dict[str, Any]] = field(default_factory=list)
     max_tool_rounds: int = 20
+    infer_max_retries: int = 3
+    infer_retry_base_sec: float = 1.0
 
     # --- Core memory ---
     core_memory_max_tokens: int = 20_000
@@ -221,6 +232,7 @@ class Config:
     exec_stdout_max_chars: int = 32_000
     max_exec_source_chars: int = 12_000
     exec_batch_interrupt_on_human: bool = False
+    exec_timeout_sec: float = 120.0
 
     # --- Chain gaps ---
     self_continue_gap_sec: float = 15.0
@@ -288,17 +300,19 @@ class Config:
                 elif cast is float:
                     setattr(self, attr, _num(v, lo=lo, hi=hi))
                 else:
-                    setattr(self, attr, cast(v))
+                    val = cast(v)
+                    # Defensive: strip string values — e.g. a model name with an
+                    # accidental trailing space would be sent verbatim to the API.
+                    setattr(self, attr, val.strip() if isinstance(val, str) else val)
 
-        # --- Env-only overrides (only if field still at default) ---
-        for attr, env_var, cast, default, lo in _ENV_OVERRIDES:
+        # --- Env-only overrides (config keys win; env fills gaps only) ---
+        for attr, env_var, keys, lo in _ENV_OVERRIDES:
+            if any(k in cfg for k in keys):
+                continue  # config.json set this field explicitly
             v = _env_str(env_var)
-            if v is None or default is None:
+            if v is None:
                 continue
-            current = getattr(self, attr)
-            if current == default:
-                n = _num(v, lo=lo) if cast is float else v
-                setattr(self, attr, n)
+            setattr(self, attr, _num(v, lo=lo))
 
         # --- context_window_tail_tokens cap ---
         if self.context_window_tail_tokens >= self.context_window_max_tokens:

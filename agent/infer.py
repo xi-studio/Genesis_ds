@@ -21,14 +21,19 @@ import asyncio
 import json
 from typing import Any
 
-from openai import BadRequestError
+from openai import (
+    BadRequestError,
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+    InternalServerError,
+)
 
 from agent.config import Config
 from agent.timestamp import now_local
 from agent.consciousness import (
     compose_infer_messages,
     extend_messages,
-    perceive,
     record_infer_prompt_usage,
 )
 from agent.output import say
@@ -137,17 +142,80 @@ def _extract_reasoning_and_content(obj: Any) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Transient-error retry (exponential backoff)
+# ---------------------------------------------------------------------------
+
+# Transient errors worth retrying. BadRequestError / AuthenticationError are
+# permanent (retrying won't help). CancelledError must propagate immediately.
+_RETRYABLE_ERRORS = (
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+    InternalServerError,
+)
+
+
+def _retry_after_seconds(exc: Any, attempt: int, base: float) -> float:
+    """Backoff seconds for this attempt. RateLimit honors Retry-After if present."""
+    # Try Retry-After header on rate-limit/status errors
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        headers = getattr(resp, "headers", None)
+        if headers:
+            for key in ("retry-after", "Retry-After"):
+                val = None
+                try:
+                    val = headers.get(key)
+                except Exception:
+                    val = None
+                if val:
+                    try:
+                        return max(0.0, float(val))
+                    except (TypeError, ValueError):
+                        pass
+    # Exponential backoff: base * 2^attempt, capped at 30s
+    return min(30.0, float(base) * (2 ** attempt))
+
+
+async def _with_retry(make_call, cfg: Config):
+    """Invoke ``make_call()`` (a zero-arg coroutine factory) with retry on transient
+    errors. CancelledError propagates immediately; permanent errors are not retried."""
+    max_retries = max(0, int(getattr(cfg, "infer_max_retries", 3)))
+    base = float(getattr(cfg, "infer_retry_base_sec", 1.0))
+    attempt = 0
+    while True:
+        try:
+            return await make_call()
+        except asyncio.CancelledError:
+            raise  # user cancel must not be swallowed
+        except _RETRYABLE_ERRORS as e:
+            if attempt >= max_retries:
+                say(f"  [infer retry] gave up after {attempt} retr{'y' if attempt==1 else 'ies'}: {type(e).__name__}", flush=True)
+                raise
+            delay = _retry_after_seconds(e, attempt, base)
+            attempt += 1
+            say(f"  [infer retry] {type(e).__name__} — retry {attempt}/{max_retries} in {delay:.1f}s", flush=True)
+            await asyncio.sleep(delay)
+
+
+# ---------------------------------------------------------------------------
 # Stream creation
 # ---------------------------------------------------------------------------
 
 async def _create_stream(client, **kwargs) -> Any:
-    """Create a stream, with optional ``stream_options`` for usage tracking."""
-    try:
-        return await client.chat.completions.create(
-            **kwargs, stream_options={"include_usage": True}
-        )
-    except (TypeError, BadRequestError):
-        return await client.chat.completions.create(**kwargs)
+    """Create a stream, with optional ``stream_options`` for usage tracking.
+    Retries transient errors via :func:`_with_retry`."""
+    cfg = Config.get()
+
+    async def _call():
+        try:
+            return await client.chat.completions.create(
+                **kwargs, stream_options={"include_usage": True}
+            )
+        except (TypeError, BadRequestError):
+            return await client.chat.completions.create(**kwargs)
+
+    return await _with_retry(_call, cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -314,8 +382,11 @@ async def _process_stream(
     thr = cfg.stream_flush_chars
     label = "tools" if has_tools else ""
     batched = "batched" if thr > 0 else ""
-    parts = [s for s in ["assistant", "streaming", label, batched] if s]
-    say(f"--- {' ('.join(parts[1:]) + ')' if len(parts) > 2 else ''} ---" if len(parts) > 1 else "--- assistant (streaming) ---")
+    parts = [s for s in ["streaming", label, batched] if s]
+    if parts:
+        say(f"--- assistant ({', '.join(parts)}) ---")
+    else:
+        say("--- assistant ---")
 
     buf: list[str] = []
     blen = 0
@@ -529,7 +600,7 @@ async def _infer_nonstream(client, cfg: Config, messages: list[dict[str, Any]],
                            *, infer_window: list[dict[str, Any]] | None = None) -> str | tuple:
     """Single non-streaming completion. Returns str (plain) or tuple (tool round)."""
     kw = _api_kwargs(cfg, messages, stream=False, tools=tools, _extra=_extra)
-    resp = await client.chat.completions.create(**kw)
+    resp = await _with_retry(lambda: client.chat.completions.create(**kw), cfg)
     usage = getattr(resp, "usage", None)
     ch = resp.choices[0] if resp.choices else None
     raw_msg = ch.message if ch else None
@@ -611,13 +682,16 @@ async def _run_tool_round(client, cfg: Config, messages: list[dict[str, Any]],
 async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, Any]],
                                   sys_content: str, tools: list[dict[str, Any]],
                                   _extra: dict[str, Any]) -> str:
-    first = True
     last_usage: Any = None
 
+    # Maintain a local copy of the infer window. The first round uses the
+    # incoming history (already perceived from DB). Subsequent rounds append
+    # assistant + tool messages locally instead of re-reading the entire DB via
+    # perceive(), avoiding redundant queries and trim checks per tool round.
+    local_hist: list[dict[str, Any]] = compose_infer_messages(history)
+
     for _round in range(max(1, int(cfg.max_tool_rounds))):
-        hist = compose_infer_messages(history) if first else compose_infer_messages(perceive())
-        first = False
-        messages = _compose_api_messages(sys_content, hist)
+        messages = _compose_api_messages(sys_content, local_hist)
 
         try:
             adict, last_usage = await _run_tool_round(client, cfg, messages, _extra, tools)
@@ -638,6 +712,7 @@ async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, An
         if tcs:
             _normalize_assistant_tool_call_ids(adict)
             extend_messages([adict])
+            local_hist.append(dict(adict))
             tool_rows: list[dict[str, Any]] = []
             for tc in tcs:
                 await asyncio.sleep(0)
@@ -657,6 +732,7 @@ async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, An
                 await _emit_tool_result_ui(cfg, name, tc_id, out)
                 tool_rows.append({"role": "tool", "tool_call_id": tc.get("id") or "", "content": out})
             extend_messages(tool_rows)
+            local_hist.extend(dict(tr) for tr in tool_rows)
             continue
 
         # Final text reply
@@ -665,7 +741,7 @@ async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, An
         extend_messages([persist])
         final_piece = reasoning + c_str
         _calibrate_from_messages(messages + [persist], last_usage)
-        record_infer_prompt_usage(messages, last_usage, infer_window=hist)
+        record_infer_prompt_usage(messages, last_usage, infer_window=local_hist)
         await _us.emit_ui_event(_infer_end_ok_payload(
             last_usage, display_text=final_piece,
             think_text=reasoning or None, reply_text=c_str or None))
@@ -678,7 +754,7 @@ async def _infer_with_tools_loop(client, cfg: Config, history: list[dict[str, An
         f"max_tool_rounds ({cfg.max_tool_rounds}) reached without a final text reply. "
         f"Continuing host cycle.\n\n/next\n"
     )
-    hist_tail = compose_infer_messages(perceive())
+    hist_tail = compose_infer_messages(local_hist)
     tail_messages = _compose_api_messages(sys_content, hist_tail)
     _calibrate_from_messages(tail_messages, last_usage)
     record_infer_prompt_usage(tail_messages, last_usage, infer_window=hist_tail)

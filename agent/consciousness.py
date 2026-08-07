@@ -44,7 +44,12 @@ def _db_path() -> str:
 def _db():
     path = _db_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)
+    # WAL: readers don't block writers and vice-versa — needed because
+    # consciousness and core_memory hold separate locks but write the same file.
+    # busy_timeout: wait-and-retry on contention instead of raising "database is locked".
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS consciousness_messages (
@@ -133,7 +138,7 @@ def _window_trigger_total(msgs: list[dict[str, Any]]) -> int:
     return max(0, int(non_window_api + window_est * window_scale))
 
 
-def _single_message_tokens(m: dict[str, Any]) -> int:
+def _compute_message_tokens(m: dict[str, Any]) -> int:
     n = 0
     c = m.get("content")
     if isinstance(c, str) and c:
@@ -149,6 +154,18 @@ def _single_message_tokens(m: dict[str, Any]) -> int:
     if m.get("role") == "tool" and (tid := m.get("tool_call_id")):
         n += count_tokens(str(tid))
     return max(n, 1)
+
+
+def _single_message_tokens(m: dict[str, Any]) -> int:
+    """Token size of one message. Uses the cached ``_tokens`` field when present
+    (messages are immutable once stored, so the count never changes), otherwise
+    computes it on the fly. Caching is populated at write time in
+    :func:`_normalize_stored_message`."""
+    cached = m.get("_tokens")
+    if isinstance(cached, int) and cached > 0:
+        return cached
+    return _compute_message_tokens(m)
+
 
 
 # ── Boot / Schema ───────────────────────────────────────────────────────
@@ -241,6 +258,12 @@ def _normalize_stored_message(m: dict[str, Any]) -> dict[str, Any]:
             continue
         if v is not None:
             out[k] = v
+
+    # Cache the token size once at write time (messages are immutable in the
+    # append-only log, so this never needs recomputing during trim). Stored under
+    # the ``_tokens`` key, which _strip_infer_keys() removes before the API sees it.
+    out.pop("_tokens", None)
+    out["_tokens"] = _compute_message_tokens(out)
     return out
 
 
@@ -277,14 +300,33 @@ def _suffix_is_valid_chat_completions(msgs: list[dict[str, Any]]) -> bool:
 
 
 def _left_trim_to_valid_chat_prefix(msgs: list[dict[str, Any]]) -> int:
-    for drop in range(len(msgs) + 1):
+    """Drop messages from the left until the suffix is valid for chat.completions.
+
+    Skips complete atomic blocks (assistant+tool_calls+tool_results) instead of
+    individual messages, preserving maximum context.  When a broken tool_calls
+    block is encountered (orphaned tool results, or missing tool results), the
+    entire broken block is dropped in one step rather than one message at a time.
+    """
+    drop = 0
+    while drop < len(msgs):
         if _suffix_is_valid_chat_completions(msgs[drop:]):
             return drop
+        # Skip the next atomic block to reach a potentially valid prefix.
+        block_len = _atomic_block_len(msgs[drop:])
+        if block_len <= 0:
+            block_len = 1
+        drop += block_len
     return len(msgs)
 
 
 def _atomic_block_len(msgs: list[dict[str, Any]]) -> int:
-    """Left-most trim unit: one message, or assistant + following tool rows."""
+    """Left-most trim unit: one message, or assistant + following tool rows.
+
+    For assistant(tool_calls), counts the actual number of consecutive ``tool``
+    messages that follow (capped at ``len(tool_calls)``), rather than blindly
+    assuming all ``len(tool_calls)`` results are present.  This prevents
+    miscalculation when tool results are missing or interleaved with other roles.
+    """
     if not msgs:
         return 0
     m = msgs[0]
@@ -292,7 +334,14 @@ def _atomic_block_len(msgs: list[dict[str, Any]]) -> int:
         return 1
     if m.get("role") == "assistant" and (tcs := m.get("tool_calls")):
         if isinstance(tcs, list) and tcs:
-            return min(len(msgs), 1 + len(tcs))
+            expected = len(tcs)
+            actual = 0
+            for k in range(1, min(expected + 1, len(msgs))):
+                if msgs[k].get("role") == "tool":
+                    actual += 1
+                else:
+                    break
+            return min(len(msgs), 1 + actual)
     return 1
 
 
@@ -383,26 +432,6 @@ def _maybe_trim_infer_window(conn: sqlite3.Connection, *, quiet: bool,
 
 # ── Public API ──────────────────────────────────────────────────────────
 
-def load_messages() -> list[dict[str, Any]]:
-    with _STORE_LOCK, _db() as conn:
-        cur = conn.execute("SELECT id, body FROM consciousness_messages ORDER BY id ASC")
-        return [_strip_msg_id(_row_to_message(int(r[0]), str(r[1]))) for r in cur.fetchall()]
-
-
-def save_messages(messages: list[dict[str, Any]]) -> None:
-    with _STORE_LOCK, _db() as conn:
-        conn.execute("DELETE FROM consciousness_messages")
-        try:
-            conn.execute("DELETE FROM sqlite_sequence WHERE name = 'consciousness_messages'")
-        except sqlite3.OperationalError:
-            pass
-        for m in messages:
-            if isinstance(m, dict) and m.get("role"):
-                conn.execute("INSERT INTO consciousness_messages (body) VALUES (?)",
-                             (json.dumps(_normalize_stored_message(m), ensure_ascii=False),))
-        _sync_window_cover_all(conn)
-
-
 def append(text: str, *, role: str = "user", **extra: Any) -> None:
     if not (text or "").strip() and not extra.get("tool_calls"):
         return
@@ -456,3 +485,22 @@ def get_window() -> dict[str, Any]:
 
 def compose_infer_messages(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [dict(m) for m in history]
+
+
+def recent_messages(limit: int = 100) -> list[dict[str, Any]]:
+    """Most recent ``limit`` rows of the consciousness log (oldest→newest).
+
+    Returns chat-shaped dicts with ``id``, without internal ``_tokens`` —
+    safe for display (e.g. the web history endpoint).
+    """
+    n = max(1, min(int(limit), 1000))
+    with _STORE_LOCK, _db() as conn:
+        rows = conn.execute(
+            "SELECT id, body FROM consciousness_messages ORDER BY id DESC LIMIT ?",
+            (n,),
+        ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in reversed(rows):
+        m = _row_to_message(int(r[0]), str(r[1]))
+        out.append({k: v for k, v in m.items() if not str(k).startswith("_")})
+    return out

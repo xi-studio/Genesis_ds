@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Chat shell for MolAgent core_loop — layout / tokens echo genesis_web_native (Infero). -->
+<!-- Chat shell for core_loop — layout / tokens echo genesis_web_native (Infero). -->
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -24,6 +24,27 @@
       --red: #e84057;
       --amber: #d4a017;
       --panel-bg: #020c1a;
+      --user-bg: rgba(255,255,255,0.04);
+      --code-bg: #0c0c10;
+      --sunken-bg: rgba(0, 0, 0, 0.22);
+    }
+    /* 护眼浅色主题：柔和暖灰白底，降低对比度疲劳，非刺眼纯白 */
+    :root[data-theme="light"] {
+      --bg: #f4f2ec;
+      --bg-raised: #faf8f3;
+      --text: #3a3a42;
+      --text-dim: #8a8a96;
+      --accent: #0a9d82;
+      --accent-dim: rgba(10, 157, 130, 0.10);
+      --accent-glow: rgba(10, 157, 130, 0.22);
+      --border: rgba(60,55,45,0.12);
+      --border-active: rgba(60,55,45,0.22);
+      --red: #c8344a;
+      --amber: #9a7610;
+      --panel-bg: #eef1f4;
+      --user-bg: rgba(10, 157, 130, 0.07);
+      --code-bg: #ece9e1;
+      --sunken-bg: rgba(60, 55, 45, 0.05);
     }
     * { box-sizing: border-box; }
     body {
@@ -58,9 +79,24 @@
     .brand-icon svg { display: block; }
     .header-meta {
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 4px;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+    }
+    .theme-toggle {
+      background: var(--accent-dim);
+      border: 1px solid var(--border-active);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 3px 8px;
+      font-size: 0.85rem;
+      line-height: 1;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .theme-toggle:hover {
+      background: var(--accent-glow);
+      border-color: var(--accent);
     }
     .last-prompt {
       font-family: 'JetBrains Mono', monospace;
@@ -84,6 +120,23 @@
     }
     .title-area .status {
       margin-left: 4px;
+    }
+    .model-badge {
+      margin-left: 8px;
+      padding: 2px 8px;
+      border: 1px solid var(--border-active);
+      border-radius: 10px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      font-weight: 500;
+      letter-spacing: 0.4px;
+      white-space: nowrap;
+      max-width: 22vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 0;
     }
     .status {
       font-family: 'JetBrains Mono', monospace;
@@ -153,7 +206,7 @@
     }
     .msg.user {
       align-self: flex-end;
-      background: rgba(255,255,255,0.04);
+      background: var(--user-bg);
       border: 1px solid var(--border);
       color: var(--text);
     }
@@ -201,7 +254,7 @@
       margin-bottom: 10px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: rgba(0, 0, 0, 0.22);
+      background: var(--sunken-bg);
       overflow: hidden;
     }
     .msg-thinking-fold:not([open]) {
@@ -325,7 +378,7 @@
     .msg p { margin: 0 0 8px 0; }
     .msg p:last-child { margin-bottom: 0; }
     .msg pre {
-      background: #0c0c10;
+      background: var(--code-bg);
       padding: 12px;
       border-radius: 4px;
       overflow-x: auto;
@@ -510,6 +563,80 @@
       text-underline-offset: 2px;
     }
     .footer-tagline button.linkish:hover { color: var(--text); }
+
+    /* ── Mobile / touch optimizations ── */
+    @media (max-width: 640px) {
+      .header {
+        padding: 8px 10px;
+        gap: 6px;
+      }
+      .title-area { gap: 6px; }
+      .header h1 { font-size: 0.75rem; }
+      .brand-icon svg { width: 18px; height: 18px; }
+      .model-badge {
+        font-size: 0.55rem;
+        max-width: 30vw;
+        padding: 1px 6px;
+      }
+      .status {
+        font-size: 0.58rem;
+        max-width: 40vw;
+      }
+      .last-prompt {
+        display: none; /* free up header space on mobile */
+      }
+      .theme-toggle {
+        padding: 4px 6px;
+        font-size: 0.75rem;
+      }
+      #chat-box {
+        padding: 6px 8px;
+        gap: 6px;
+      }
+      .msg {
+        font-size: 0.85rem;
+        padding: 6px 10px;
+        border-radius: 5px;
+      }
+      .msg pre {
+        font-size: 0.72rem;
+        padding: 8px;
+        max-height: min(40vh, 300px);
+      }
+      .msg-thinking-body {
+        max-height: min(15vh, 140px);
+        font-size: 0.7rem;
+      }
+      .input-area {
+        padding: 8px;
+        gap: 6px;
+      }
+      textarea {
+        font-size: 16px; /* prevent iOS zoom on focus */
+        min-height: 40px;
+        max-height: 100px;
+        padding: 6px 8px;
+      }
+      button.send {
+        min-width: 4rem;
+        font-size: 0.7rem;
+        padding: 0 12px;
+      }
+      .footer-tagline {
+        font-size: 0.58rem;
+        padding: 4px 8px 6px;
+      }
+      /* Scrollbars: thinner on mobile */
+      #chat-box::-webkit-scrollbar { width: 6px; }
+      .msg pre::-webkit-scrollbar { height: 6px; width: 6px; }
+    }
+
+    /* ── Extra small screens (≤380px) ── */
+    @media (max-width: 380px) {
+      .header h1 { display: none; }
+      .model-badge { max-width: 25vw; }
+      .status { max-width: 35vw; }
+    }
   </style>
 </head>
 <body>
@@ -517,9 +644,11 @@
     <div class="title-area">
       <span class="brand-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="22" height="22"><circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="50" cy="50" r="8" fill="currentColor"/></svg></span>
       <h1>Infero</h1>
+      <span class="model-badge" id="model-badge" title="当前使用的模型">—</span>
       <span class="status" id="status">Disconnected</span>
     </div>
     <div class="header-meta">
+      <button class="theme-toggle" id="theme-toggle" title="切换深色 / 浅色主题" aria-label="切换主题">🌙</button>
       <span class="last-prompt" id="last-prompt-k" title="上一轮输入 token（k 显示）；悬停为精确值（usage.prompt_tokens）">上轮 · —</span>
     </div>
   </header>
@@ -529,18 +658,53 @@
     <button type="button" class="send" id="btn-send">Send</button>
   </div>
   <div class="footer-tagline">
-    <span>DB Agent</span>
-    <button type="button" class="linkish" id="btn-clear-history" title="清除浏览器本地保存的聊天记录">清除本地聊天记录</button>
+    <span>Digital Being</span>
   </div>
   <script>
 (function () {
-  const STORAGE_KEY = 'molagent_core_loop_chat_v1';
-  const MAX_HISTORY_ENTRIES = 400;
   const chat = document.getElementById('chat-box');
   const input = document.getElementById('input');
   const statusEl = document.getElementById('status');
+  // --- Theme (dark/light) with persistence ---
+  (function initTheme() {
+    const saved = localStorage.getItem('infero-theme');
+    if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  })();
+  function applyThemeButton() {
+    const btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    btn.textContent = isLight ? '☀️' : '🌙';
+    btn.title = isLight ? '切换到深色主题' : '切换到浅色主题';
+  }
+  function toggleTheme() {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    if (isLight) {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('infero-theme', 'dark');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'light');
+      localStorage.setItem('infero-theme', 'light');
+    }
+    applyThemeButton();
+  }
+  (function bindTheme() {
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.addEventListener('click', toggleTheme);
+    applyThemeButton();
+  })();
+  const modelBadgeEl = document.getElementById('model-badge');
+  let currentModel = '';
+  function setModel(name) {
+    if (name && typeof name === 'string') {
+      currentModel = name;
+      if (modelBadgeEl) {
+        modelBadgeEl.textContent = name;
+        modelBadgeEl.title = '当前使用的模型：' + name;
+      }
+    }
+  }
   const lastPromptEl = document.getElementById('last-prompt-k');
-  const btnClearHistory = document.getElementById('btn-clear-history');
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = proto + '//' + location.host + '/ws';
   let ws = null;
@@ -553,70 +717,153 @@
   let streamRenderRaf = 0;
   /** 本轮 infer：按事件顺序拼接（多段 thinking/正文 + tool 交错），无外层大框 */
   let inferThreadEl = null;
-  let historyEntries = [];
-
-  function persistHistory() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(historyEntries));
-    } catch (err) {
-      console.warn('chat history persist failed', err);
-    }
-  }
-
-  function pushHistory(entry) {
-    historyEntries.push(entry);
-    while (historyEntries.length > MAX_HISTORY_ENTRIES) {
-      historyEntries.shift();
-    }
-    persistHistory();
-  }
-
-  function replayHistory() {
-    chat.innerHTML = '';
-    historyEntries.forEach(function (e) {
-      if (e.k === 'user') {
-        renderUser(e.text);
-      } else if (e.k === 'infer_session') {
-        chat.insertAdjacentHTML('beforeend', e.html || '');
-      } else if (e.k === 'ai') {
-        addBubble('ai', e.html);
-      } else if (e.k === 'ai_exec_stdout') {
-        const d = document.createElement('div');
-        d.className = 'msg ai exec-stdout';
-        d.innerHTML = e.html;
-        chat.appendChild(d);
-      } else if (e.k === 'timestamp') {
-        var tdiv = document.createElement('div');
-        tdiv.className = 'msg-timestamp';
-        tdiv.textContent = e.text || '';
-        chat.appendChild(tdiv);
-      } else if (e.k === 'system') {
-        addBubble('system', e.html);
-      }
-    });
-    scrollBottom(true);
-  }
-
+  /** 从后端 /api/history 拉取最近聊天历史（数据源 = agent.db consciousness_messages）。 */
   function loadHistory() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      historyEntries = parsed;
-      replayHistory();
-    } catch (err) {
-      historyEntries = [];
-      console.warn('chat history load failed', err);
-    }
+    var url = '/api/history?limit=100';
+    fetch(url)
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        var msgs = (data && Array.isArray(data.messages)) ? data.messages : [];
+        chat.innerHTML = '';
+        if (!msgs.length) {
+          addBubble('system', '<p class="md-fallback">（暂无历史消息）</p>');
+        } else {
+          renderHistory(msgs);
+        }
+        scrollLatestAfterLayout();
+      })
+      .catch(function (err) {
+        console.warn('history load failed', err);
+        addBubble(
+          'system',
+          '<p class="md-fallback">历史加载失败：' + escHtml(String((err && err.message) || err)) + '</p>'
+        );
+        scrollBottom(true);
+      });
   }
 
-  function clearStoredHistory() {
-    historyEntries = [];
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (err) { /* ignore */ }
-    chat.innerHTML = '';
+  /** 解析用户消息：剥掉 "System - [Trigger] [时间] [Human] " 包装。返回 {kind, text, ts}。 */
+  function cleanUserText(content) {
+    var s = String(content || '');
+    var m = s.match(/^System - \[Trigger\] \[([^\]]+)\]\s*\[Human\]\s*([\s\S]*)$/);
+    if (m) return { kind: 'human', text: (m[2] || '').trim(), ts: m[1] };
+    m = s.match(/^System - \[([^\]]+)\](?:\s*\[([^\]]+)\])?\s*([\s\S]*)$/);
+    if (m) return { kind: 'system', text: ((m[3] || '').trim() || ('System - [' + m[1] + ']')), ts: m[2] || null };
+    return { kind: 'human', text: s, ts: null };
+  }
+
+  /** 历史渲染：按"用户回合"重建会话分组，结构与实时聊天一致
+      （时间戳行 + 用户气泡 + infer-thread[会话时间头 + 正文段 + 工具折叠]）。 */
+  function renderHistory(msgs) {
+    var session = null;        // 当前 infer-thread 容器（DOM 元素）
+    var pendingCalls = [];     // 待配对的工具调用 {id, name, argsHtml}
+
+    function closeSession() {
+      session = null;
+      pendingCalls = [];
+    }
+
+    function newSession(ts) {
+      closeSession();
+      session = document.createElement('div');
+      session.className = 'infer-thread';
+      var tsHead = document.createElement('div');
+      tsHead.className = 'infer-thread-ts';
+      tsHead.textContent = ts ? formatChatTimestamp(ts) : formatChatTimestamp();
+      session.appendChild(tsHead);
+      chat.appendChild(session);
+    }
+
+    function appendToSession(cls, html) {
+      if (!session) newSession(null);
+      var d = document.createElement('div');
+      d.className = cls;
+      d.innerHTML = html;
+      session.appendChild(d);
+    }
+
+    function toolFoldHtml(summary, body) {
+      return '<details class="exec-fold tool-fold" open>'
+        + '<summary>' + escHtml(summary) + '</summary>'
+        + '<pre><code>' + escHtml(body) + '</code></pre></details>';
+    }
+
+    msgs.forEach(function (m) {
+      var role = m.role;
+      if (role === 'user') {
+        var cu = cleanUserText(m.content);
+        closeSession();
+        if (cu.kind === 'human' && cu.text) {
+          var tdiv = document.createElement('div');
+          tdiv.className = 'msg-timestamp';
+          tdiv.textContent = formatChatTimestamp(cu.ts);
+          chat.appendChild(tdiv);
+          addBubble('user', escHtml(cu.text).replace(/\n/g, '<br>'));
+          newSession(cu.ts);
+        } else {
+          addBubble('system', escHtml(cu.text).replace(/\n/g, '<br>'));
+        }
+        return;
+      }
+      if (role === 'assistant') {
+        var content = String(m.content || '');
+        var tcs = (m.tool_calls && m.tool_calls.length) ? m.tool_calls : [];
+        if (content.trim()) {
+          if (content.indexOf('[Error]') === 0 || content.indexOf('System - ') === 0) {
+            closeSession();
+            var cls = content.indexOf('[Error]') === 0 ? 'infer-thread-error' : '';
+            var inner = cls ? '<p class="infer-thread-error">' + escHtml(content).replace(/\n/g, '<br>') + '</p>'
+                            : escHtml(content).replace(/\n/g, '<br>');
+            addBubble('system', inner);
+          } else {
+            appendToSession('msg ai infer-model-segment', parseReplyMarkdownWithStdoutBlocks(content));
+          }
+        }
+        if (tcs.length) {
+          closeSession();
+          newSession(null);
+          pendingCalls = [];
+          tcs.forEach(function (tc, idx) {
+            var tid = String((tc && tc.id) || ('call_' + idx));
+            var fn = String(((tc && tc.function && tc.function.name) || 'tool_' + idx));
+            var args = String(((tc && tc.function && tc.function.arguments) || ''));
+            if (args.length > 2000) args = args.slice(0, 2000) + '\n…(参数截断)';
+            pendingCalls.push({ id: tid, name: fn, argsHtml: toolFoldHtml('Tool · ' + fn + ' · 参数', args) });
+          });
+        }
+        return;
+      }
+      if (role === 'tool') {
+        var body = String(m.content || '');
+        if (body.length > 8000) body = body.slice(0, 8000) + '\n…(截断显示)';
+        var tid = String(m.tool_call_id || '');
+        var idx = -1;
+        for (var i = 0; i < pendingCalls.length; i++) {
+          if (pendingCalls[i].id === tid) { idx = i; break; }
+        }
+        var call = idx >= 0 ? pendingCalls.splice(idx, 1)[0] : null;
+        var name = call ? call.name : 'Tool';
+        var html = (call ? call.argsHtml : '')
+          + toolFoldHtml('Tool · ' + name + ' · 返回', body);
+        if (session && call) {
+          // 参数折叠已随 call 记录；结果折叠直接追加进会话
+          var d = document.createElement('div');
+          d.className = 'infer-tool-item msg system';
+          d.innerHTML = html;
+          session.appendChild(d);
+        } else {
+          addBubble('system', html);
+        }
+        return;
+      }
+      // 其它角色：系统消息
+      closeSession();
+      addBubble('system', escHtml(String(m.content || '')).replace(/\n/g, '<br>'));
+    });
+    closeSession();
   }
 
   function updateSendBtn() {
@@ -691,7 +938,7 @@
       const mode = ev.wait_mode || '';
       const modeLab =
         mode === 'sleep'
-          ? ' · /sleep'
+          ? ''
           : mode === 'fallback'
             ? ' · 默认等待'
             : '';
@@ -840,7 +1087,6 @@
       return;
     }
     addBubble('system', htmlInner);
-    pushHistory({ k: 'system', html: htmlInner });
   }
 
   /** Generic function-calling tool (exec 仍走 exec / exec_stdout 事件，避免重复). */
@@ -858,7 +1104,6 @@
       return;
     }
     addBubble('system', htmlInner);
-    pushHistory({ k: 'system', html: htmlInner });
   }
 
   function addToolResultFold(toolName, bodyEscaped, truncated) {
@@ -875,7 +1120,6 @@
       return;
     }
     addBubble('system', htmlInner);
-    pushHistory({ k: 'system', html: htmlInner });
   }
 
   /** Stdout: same visual as ``` blocks inside assistant messages (no amber fold). */
@@ -893,7 +1137,6 @@
     d.innerHTML = htmlInner;
     chat.appendChild(d);
     scrollBottom();
-    pushHistory({ k: 'ai_exec_stdout', html: htmlInner });
   }
 
   function renderUser(text) {
@@ -901,10 +1144,8 @@
   }
 
   function addUser(text, serverTime) {
-    var ts = addTimestampRow(serverTime);
-    pushHistory({ k: 'timestamp', text: ts });
+    addTimestampRow(serverTime);
     renderUser(text);
-    pushHistory({ k: 'user', text: text });
   }
 
   var STDOUT_MARKER = 'System - [/exec python stdout]';
@@ -1034,18 +1275,12 @@
     if (streamDiv) {
       try {
         renderStreamingAi();
-        if (!inferThreadEl) {
-          pushHistory({ k: 'ai', html: streamDiv.innerHTML });
-        }
       } catch (e) {
         console.warn('finalizeStream failed', e);
         var fb = escHtml(thinkBuf + replyBuf).replace(/\n/g, '<br>');
         streamDiv.innerHTML = (thinkBuf || '').trim()
           ? wrapThinkingBlock('<p class="md-fallback">' + fb + '</p>')
           : '<p class="md-fallback">' + fb + '</p>';
-        if (!inferThreadEl) {
-          pushHistory({ k: 'ai', html: streamDiv.innerHTML });
-        }
       }
       streamDiv = null;
     }
@@ -1064,7 +1299,8 @@
   function _onEvent_inner(ev) {
     const t = ev.event;
     if (t === 'hello') {
-      statusEl.textContent = 'Ready · ' + (ev.model || '');
+      setModel(ev.model || '');
+      statusEl.textContent = 'Ready';
       return;
     }
     if (t === 'user') {
@@ -1074,7 +1310,6 @@
     if (t === 'infer_begin') {
       finalizeStream();
       if (inferThreadEl) {
-        pushHistory({ k: 'infer_session', html: inferThreadEl.outerHTML });
         inferThreadEl.remove();
         inferThreadEl = null;
       }
@@ -1148,13 +1383,11 @@
               '<p class="infer-thread-error">' + escHtml(errText) + '</p>'
             );
           }
-          pushHistory({ k: 'infer_session', html: inferThreadEl.outerHTML });
           inferThreadEl = null;
         } else if (ev.ok === false) {
           const err = ev.error || (ev.cancelled ? '本轮推理已打断（Infer cancelled）' : 'Error');
           const sysHtml = escHtml(err);
           addBubble('system', sysHtml);
-          pushHistory({ k: 'system', html: sysHtml });
         }
         if (lastPromptEl && ev.ok !== false) {
           lastPromptEl.textContent = formatUsageLine(ev);
@@ -1206,15 +1439,34 @@
     }
   }
 
+  // --- WebSocket auto-reconnect (exponential backoff) ---
+  var wsReconnectDelay = 1000;
+  var WS_RECONNECT_MAX = 30000;
+  var wsReconnectTimer = 0;
+  var wsIntentionalClose = false;
+
+  function scheduleReconnect() {
+    if (wsReconnectTimer) return;
+    var secs = (wsReconnectDelay / 1000).toFixed(0);
+    statusEl.textContent = '连接断开 · ' + secs + 's 后重连…';
+    wsReconnectTimer = window.setTimeout(function () {
+      wsReconnectTimer = 0;
+      connect();
+    }, wsReconnectDelay);
+    wsReconnectDelay = Math.min(WS_RECONNECT_MAX, Math.round(wsReconnectDelay * 1.5));
+  }
+
   function connect() {
+    if (wsReconnectTimer) { window.clearTimeout(wsReconnectTimer); wsReconnectTimer = 0; }
     statusEl.textContent = 'Connecting…';
+    wsIntentionalClose = false;
     ws = new WebSocket(wsUrl);
     ws.onopen = function () {
+      wsReconnectDelay = 1000;
       statusEl.textContent = '已连接';
       updateSendBtn();
     };
     ws.onclose = function () {
-      statusEl.textContent = '未连接 — 请刷新';
       if (streamRenderRaf) {
         cancelAnimationFrame(streamRenderRaf);
         streamRenderRaf = 0;
@@ -1223,9 +1475,11 @@
       inferThreadEl = null;
       inferring = false;
       updateSendBtn();
+      if (wsIntentionalClose) return;
+      scheduleReconnect();
     };
     ws.onerror = function () {
-      statusEl.textContent = 'WebSocket error';
+      statusEl.textContent = 'WebSocket error · 重连中…';
     };
     ws.onmessage = function (e) {
       try {
@@ -1276,14 +1530,6 @@
   loadHistory();
   scrollLatestAfterLayout();
   connect();
-
-  if (btnClearHistory) {
-    btnClearHistory.onclick = function () {
-      if (window.confirm('确定清除本地保存的聊天记录？（不可恢复）')) {
-        clearStoredHistory();
-      }
-    };
-  }
 })();
   </script>
 </body>
