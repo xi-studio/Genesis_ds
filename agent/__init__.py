@@ -1,5 +1,5 @@
 """
-MolAgent Core (DeepSeek) — perceive / infer / host loop.
+Core (DeepSeek) — perceive / infer / host loop.
 
 Python on the host runs only via the **exec** function tool (default tool bundle).
 

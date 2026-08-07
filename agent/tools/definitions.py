@@ -39,8 +39,9 @@ def _tool(name: str, desc: str, **params) -> dict:
 TOOL_DEFINITIONS = [
     _tool("exec",
         "Execute Python on the host in the shared exec namespace (``trigger``, etc.). "
-        "Top-level await is supported. For files use the ``read_file`` / ``write_file`` / "
-        "``edit_file`` / ``grep`` tools or ``open()`` in code; prefer ``shell`` when it fits.",
+        "Top-level await is supported. Runs under a timeout (exec_timeout_sec, default 120s); "
+        "the event loop stays responsive during execution. For files use the ``read_file`` / "
+        "``write_file`` / ``edit_file`` / ``grep`` tools or ``open()`` in code; prefer ``shell`` when it fits.",
         code=_p("string", "Python code to execute"),
     ),
     _tool("read_file",
@@ -83,7 +84,7 @@ TOOL_DEFINITIONS = [
         path=_p("string", "File or directory to search (default '.')", required=False),
         glob=_p("string", "Optional path filter, e.g. '*.py' or 'tests/**/test_*.py'", required=False),
         type=_p("string", "Optional type shorthand: py, ts, md, json, yaml, ...", required=False),
-        case_insensitive=_p("boolean", "", required=False),
+        case_insensitive=_p("boolean", "If true, perform case-insensitive matching", required=False),
         fixed_strings=_p("boolean", "If true, pattern is plain text (not regex)", required=False),
         output_mode=_p("string", "files_with_matches: list paths (default); content: lines + context; count: match counts per file",
             enum=["content", "files_with_matches", "count"], required=False),
@@ -331,7 +332,9 @@ def _handle_edit_file(args: dict[str, Any]) -> str:
 
 async def _handle_shell(args: dict[str, Any]) -> str:
     command = args.get("command", "")
-    timeout = args.get("timeout", 30)
+    # Clamp to [1, 600]s so an oversized/mistyped timeout can never block the
+    # tool loop indefinitely — a runaway command is killed at the timeout.
+    timeout = _to_int(args.get("timeout"), 30, lo=1, hi=600)
     cwd = args.get("cwd")
     if not command.strip():
         return "(empty command)"

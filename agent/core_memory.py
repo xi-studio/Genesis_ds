@@ -240,17 +240,6 @@ def disk_update(entry_id: str, content: str, priority: str | None = None) -> dic
         out["priority"] = new_prio
     return out
 
-def disk_delete(entry_id: str) -> dict[str, Any]:
-    eid = str(entry_id or "").strip()
-    if not eid:
-        return {"ok": False, "error": "missing id"}
-    with _LOCK, _db() as conn:
-        cur = conn.execute("DELETE FROM core_memory_entries WHERE id = ?", (eid,))
-        if cur.rowcount == 0:
-            return {"ok": False, "error": f"unknown id {eid!r}"}
-    return {"ok": True, "id": eid}
-
-
 # ── Snapshot management ─────────────────────────────────────────────────
 
 def user_message_dict() -> dict[str, str]:

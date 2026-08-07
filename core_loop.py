@@ -93,15 +93,6 @@ async def main():
 
     os.makedirs(cfg.workspace_rel, exist_ok=True)
 
-    # [Evolution Plasmid Hook]
-    if os.path.exists("evolution_patch.py"):
-        try:
-            with open("evolution_patch.py", "r", encoding="utf-8") as _f:
-                exec(_f.read(), globals())
-            say("[System] Evolution plasmid injected successfully.")
-        except Exception as _e:
-            say(f"[System] Failed to inject plasmid: {_e}")
-
     loop = asyncio.get_running_loop()
     trigger_inbox: asyncio.Queue = asyncio.Queue()
     hp_init(loop, trigger_inbox)
@@ -133,7 +124,7 @@ async def main():
     if cfg.log_file:
         say(f"  log_file: {os.path.abspath(cfg.log_file)}")
     say(
-        f"=== MolAgent Core Loop ===\n"
+        f"=== Core Loop ===\n"
         f"  agent SQLite: {cfg.agent_db_file}\n"
         f"    tables: consciousness_messages, agent_state; core_memory_entries, core_memory_snapshot\n"
         f"  infer context: agent_state.infer_context_start_id … end_id → consciousness_messages.id\n"
@@ -147,6 +138,7 @@ async def main():
     boot_auto_chain = True  # first successful infer chains like /next
 
     while True:
+      try:
         _, had_human_this_round = drain_triggers_to_consciousness()
 
         # Perceive
@@ -254,6 +246,17 @@ async def main():
         ts = now_local()
         append(f"System - [Trigger] [{ts}] {merged}\n\n", role="user")
         say(f"--- triggered ({len(msgs)} msgs, {len(merged)} chars) ---\n{merged}\n---")
+
+      except (KeyboardInterrupt, asyncio.CancelledError):
+        raise  # let the user / asyncio exit
+      except Exception as e:
+        say(
+            f"  [loop] CAUGHT {type(e).__name__}: {e} — "
+            f"sleeping 10s before retry",
+            file=sys.stderr,
+            flush=True,
+        )
+        await _interruptible_sleep(10.0, trigger_inbox)
 
 
 if __name__ == "__main__":
