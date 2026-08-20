@@ -427,7 +427,11 @@ async def _process_stream(
                     _feed_tool_delta_fragments(tool_acc, dtools)
 
             r, c = _extract_reasoning_and_content(delta)
-            event_type = "think_delta" if has_tools else "reply_delta"
+            # content_as_think: only route content into the think stream when
+            # tool_calls are actually accumulating in this turn; otherwise (pure
+            # text turn / thinking-model prose in content) emit as reply.
+            content_as_think = has_tools and bool(tool_acc)
+            event_type = "think_delta" if content_as_think else "reply_delta"
             if r:
                 reasoning_acc += r
                 sent_think = True

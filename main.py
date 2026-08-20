@@ -11,12 +11,29 @@ import os
 import sys
 import threading
 
+from aiohttp import web  # noqa: E402
 import core_loop  # noqa: E402 — same-directory entry point
 from agent.config import Config
 from agent.output import say
 from agent.host_primitives import trigger, _cancel_infer_if_running
 from agent.timestamp import now_local
 import agent.ui_stub as _us
+
+
+@web.middleware
+async def _cors_middleware(request, handler):
+    """CORS headers for browser cross-origin access (e.g. /api/history, /files).
+
+    WebSocket upgrade handlers may return None — skip those (aiohttp manages
+    the protocol upgrade itself).
+    """
+    resp = await handler(request)
+    if resp is None or not hasattr(resp, "headers"):
+        return resp
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Headers"] = "x-token, content-type"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
 
 
 # --- Override ui_stub emit_ui_event with real implementation ---
@@ -140,7 +157,7 @@ async def _start_web_server() -> None:
             charset="utf-8",
         )
 
-    app = web.Application()
+    app = web.Application(middlewares=[_cors_middleware])
     app.router.add_get("/", index)
     app.router.add_get("/api/history", history)
     app.router.add_get("/favicon.ico", favicon)
