@@ -39,20 +39,24 @@ python main.py
 ## 目录结构
 
 ```
-DB_ds/
-├── main.py              # Agent 入口
+Genesis_ds/
+├── main.py              # Agent 入口 + Web 服务器（含 CORS）
 ├── core_loop.py         # 推理-执行主循环
 ├── run.sh               # 一键启动脚本
 ├── requirements.txt     # Python 依赖
 ├── config.json          # LLM 配置（需自行填入 API key）
 ├── config.json.example  # 配置模板
 ├── agent/               # Agent 框架
-│   ├── infer.py         # LLM 推理
+│   ├── infer.py         # LLM 推理（流式 + 工具循环）
 │   ├── config.py        # 配置加载
-│   ├── consciousness.py # 意识日志
-│   ├── core_memory.py   # 核心记忆
-│   ├── exec_engine.py   # 工具执行
-│   └── tools/           # 工具定义
+│   ├── consciousness.py # 意识日志（SQLite + 窗口裁剪）
+│   ├── core_memory.py   # 核心记忆（P1/P2/P3 + TTL）
+│   ├── exec_engine.py   # exec 工具（进程内代码执行）
+│   ├── loop_control.py  # 尾指令解析（/next /sleep）
+│   ├── host_primitives.py # trigger / 信号处理
+│   ├── tokenizer.py     # token 精确计数（含 tokenizer_data/）
+│   ├── prompt.py        # 系统提示组装
+│   └── tools/           # 工具定义与分发
 ├── web/                 # Web 监控交互界面
 └── workspace/           # Agent 自有工作目录（由Agent自动创建、维护）
 ```
