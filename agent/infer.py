@@ -253,7 +253,34 @@ def _sanitize_chat_messages(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             d["content"] = c if c is not None else ""
         clean.append(d)
-    return clean
+
+    # ── DeepSeek thinking-mode hardening (400 fixes) ─────────────────────
+    # 1) Every assistant tool_calls turn MUST carry non-empty reasoning_content
+    #    ("The reasoning_content in the thinking mode must be passed back").
+    #    History written by other models may lack it — inject a placeholder.
+    for d in clean:
+        if d.get("role") == "assistant" and d.get("tool_calls"):
+            rc = d.get("reasoning_content")
+            if not (isinstance(rc, str) and rc.strip()):
+                d["reasoning_content"] = "[reasoning not recorded for this turn]"
+
+    # 2) tool_calls must be followed by tool rows for every call id —
+    #    cancelled rounds can leave dangling calls (invalid sequence → 400).
+    patched: list[dict[str, Any]] = []
+    for i, d in enumerate(clean):
+        patched.append(d)
+        if d.get("role") == "assistant" and d.get("tool_calls"):
+            answered = set()
+            for follow in clean[i + 1:]:
+                if follow.get("role") != "tool":
+                    break
+                answered.add(str(follow.get("tool_call_id") or ""))
+            for tc in d["tool_calls"]:
+                tc_id = str((tc or {}).get("id") or "")
+                if tc_id and tc_id not in answered:
+                    patched.append({"role": "tool", "tool_call_id": tc_id,
+                                    "content": "[tool result unavailable: round cancelled]"})
+    return patched
 
 
 # ---------------------------------------------------------------------------

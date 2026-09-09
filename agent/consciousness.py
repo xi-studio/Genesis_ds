@@ -355,6 +355,19 @@ def _pop_left_atomic(msgs: list[dict[str, Any]]) -> tuple[int, int]:
     return sum(_single_message_tokens(m) for m in block), n
 
 
+def _atomic_block_shrink(msgs: list[dict[str, Any]], cut: int) -> int:
+    """Shrink a left-cut index back to the previous atomic-block boundary."""
+    if cut <= 1:
+        return 1
+    i = 0
+    while True:
+        n = _atomic_block_len(msgs[i:])
+        if n <= 0 or i + n >= cut:
+            break
+        i += n
+    return max(1, i)
+
+
 def _tail_assistant_awaits_tool_rows(msgs: list[dict[str, Any]]) -> bool:
     if not msgs:
         return False
@@ -383,49 +396,74 @@ def _maybe_trim_infer_window(conn: sqlite3.Connection, *, quiet: bool,
     if trigger <= cap and _suffix_is_valid_chat_completions(msgs):
         return False
 
-    dropped_token = 0
+    dropped_msgs = 0
     if trigger > cap:
         while len(msgs) > 1 and total > tail_target:
+            n = _atomic_block_len(msgs)
+            if n <= 0:
+                break
+            block_tok = sum(_single_message_tokens(m) for m in msgs[:n])
+            if total - block_tok < tail_target:
+                break  # tail_target is a floor: keep >= tail_target, stop before overshooting
             removed_tok, removed_n = _pop_left_atomic(msgs)
             if removed_n <= 0:
                 break
             total -= removed_tok
-            dropped_token += removed_n
+            dropped_msgs += removed_n
         while len(msgs) > 1 and _window_trigger_total(msgs) > cap:
+            n = _atomic_block_len(msgs)
+            if n <= 0:
+                break
+            block_tok = sum(_single_message_tokens(m) for m in msgs[:n])
+            if total - block_tok < tail_target:
+                break  # floor: never collapse below tail_target (bug: few-k windows)
             removed_tok, removed_n = _pop_left_atomic(msgs)
             if removed_n <= 0:
                 break
             total -= removed_tok
-            dropped_token += removed_n
+            dropped_msgs += removed_n
 
     api_trim = 0
     needs_prefix_fix = (
         not _suffix_is_valid_chat_completions(msgs)
         and not _tail_assistant_awaits_tool_rows(msgs)
     )
-    if needs_prefix_fix and (with_tool_chain_trim or dropped_token > 0):
+    if needs_prefix_fix and (with_tool_chain_trim or dropped_msgs > 0):
         api_trim = _left_trim_to_valid_chat_prefix(msgs)
         if api_trim and msgs:
             api_trim = min(api_trim, len(msgs))
+            # Floor guard: don't let prefix repair collapse the window.
+            while api_trim > 0:
+                remain_tok = sum(_single_message_tokens(m) for m in msgs[api_trim:])
+                if remain_tok >= tail_target or api_trim <= 1:
+                    break
+                api_trim = max(1, _atomic_block_shrink(msgs, api_trim))
             del msgs[:api_trim]
 
-    if dropped_token == 0 and api_trim == 0:
+    if dropped_msgs == 0 and api_trim == 0:
         return False
 
-    _set_window_bounds(conn, msgs[0]["id"] if msgs else end_id, end_id)
+    if not msgs:
+        # Degenerate: nothing left to point at — keep previous bounds entirely.
+        say("  [windows] trim would empty the window; bounds unchanged")
+        return False
+
+    _set_window_bounds(conn, msgs[0]["id"], end_id)
 
     from agent import core_memory as _cm
     _cm.sync_snapshot_from_core_memory_conn(conn)
 
     tail_tok = sum(_single_message_tokens(m) for m in msgs)
-    if not quiet and (dropped_token or api_trim):
+    if not quiet and (dropped_msgs or api_trim):
         parts = []
-        if dropped_token:
+        if dropped_msgs:
             parts.append(
-                f"over {cap} est. tok: dropped {dropped_token} msg → ≤{tail_target} (~{tail_tok} ref.tok)"
+                f"over {cap} est. tok: dropped {dropped_msgs} msg → ≥{tail_target} (floor) (~{tail_tok} ref.tok)"
             )
         if api_trim:
             parts.append(f"tool-chain fix: dropped {api_trim} msg (~{tail_tok} tok)")
+            if tail_tok < tail_target:
+                parts.append(f"⚠ below tail floor {tail_target}")
         say(f"  [windows] {'; '.join(parts)}")
     return True
 
@@ -452,7 +490,14 @@ def extend_messages(msgs: list[dict[str, Any]]) -> None:
                          (json.dumps(_normalize_stored_message(m), ensure_ascii=False),))
         last_id = conn.execute("SELECT MAX(id) FROM consciousness_messages").fetchone()[0] or before_max
         w_start, _ = _window_bounds(conn)
-        _set_window_bounds(conn, w_start if w_start is not None else before_max + 1, last_id)
+        if w_start is None:
+            # NULL bounds mid-run (crash/cancel/external reset): recover the FULL
+            # window, not a 1-message one. Trim will converge it to tail_target.
+            w_start = conn.execute(
+                "SELECT COALESCE(MIN(id), ?) FROM consciousness_messages",
+                (before_max + 1,)).fetchone()[0]
+            say(f"  [windows] recovered NULL bounds → full window from #{w_start}")
+        _set_window_bounds(conn, w_start, last_id)
         _maybe_trim_infer_window(conn, quiet=False, with_tool_chain_trim=False)
 
 

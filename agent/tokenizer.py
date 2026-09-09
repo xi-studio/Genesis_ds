@@ -1,5 +1,4 @@
 """
-
 Token counting — exact via the DeepSeek tokenizer (HF ``tokenizers`` Rust lib),
 with a heuristic fallback when the tokenizer file is unavailable.
 
@@ -13,7 +12,6 @@ conservative for code-heavy content (DeepSeek over-counts code vs GLM).
 
 ``count_tokens`` caches the loaded instance and falls back to the CJK/Latin
 heuristic when the file is missing or loading fails.
-
 
 Heuristic (fallback only): CJK-style codepoints vs Latin/symbols/whitespace with
 separate chars-per-token ratios; ``update_ratio_from_usage`` still refines the
@@ -92,17 +90,13 @@ def update_ratio_from_usage(prompt_text: str, prompt_tokens: int) -> None:
 
 _TOKENIZER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tokenizer_data")
 
-
 # All models are approximated with the single DeepSeek tokenizer (module docstring
 # explains why). ``Config.tokenizer_reference_model`` no longer affects selection.
 _UNIVERSAL_TOKENIZER_FILE = "deepseek.json"
 
-
 _lock = threading.Lock()
 _tok_cache: dict[str, Any] = {}      # filename → Tokenizer | None
 _tokenizers_import_failed = False    # remember if the lib itself is unavailable
-
-
 
 
 def _load_tokenizer(filename: str) -> Any | None:
@@ -130,10 +124,8 @@ def _load_tokenizer(filename: str) -> Any | None:
 
 
 def _tokenizer_for_current_model() -> Any | None:
-
     """The universal tokenizer (deepseek.json) approximating every model."""
     return _load_tokenizer(_UNIVERSAL_TOKENIZER_FILE)
-
 
 
 # ---------------------------------------------------------------------------
@@ -161,5 +153,4 @@ def active_counter() -> str:
     """Diagnostic: which counting path is active."""
     if _load_tokenizer(_UNIVERSAL_TOKENIZER_FILE) is not None:
         return f"exact:{_UNIVERSAL_TOKENIZER_FILE}"
-
     return "heuristic"
