@@ -1,3 +1,5 @@
+
+
 # Genesis Agent
 
 极简 Python 版 Genesis Agent，源自 [infero-net/infero](https://github.com/infero-net/infero)。
@@ -20,7 +22,7 @@ pip install -r requirements.txt
 
 # 配置 API key
 cp config.json.example config.json
-# 编辑 config.json：填入 api_key
+# 编辑 config.json：填入 api_key（或使用环境变量 OPENAI_API_KEY / DASHSCOPE_API_KEY / DEEPSEEK_API_KEY）
 
 # 启动
 bash run.sh
